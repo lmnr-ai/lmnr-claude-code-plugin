@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 // Keep the plugin's log/state out of the real ~/.claude/state during tests.
 process.env.CC_LMNR_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-testlog-"));
 
+import { getLaminarConfig } from "../src/config.js";
 import { getPendingAgentToolUseIds, getTaskIdToToolUseId, getTurnsToEmit, resolveDeferredAgentTurns } from "../src/deferral.js";
 import { buildGenerationAttributes } from "../src/genai.js";
 import { getResultFromTaskNotification, getToolUseIdForTaskNotification, isTaskNotificationRow } from "../src/notifications.js";
@@ -484,6 +485,47 @@ describe("SessionState serialization", () => {
     assert.equal(reloaded.turnCount, 0);
     assert.deepEqual(reloaded.pendingAgentTurns, []);
     assert.deepEqual(reloaded.pendingTaskNotifications, []);
+  });
+});
+
+describe("user_id resolution", () => {
+  it("prefers LMNR_USER_ID, then lmnr-cli credentials email, then null", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-creds-"));
+    const saved: Record<string, string | undefined> = {};
+    const set = (k: string, v: string | undefined) => {
+      if (!(k in saved)) saved[k] = process.env[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    };
+    try {
+      // Neutralize plugin-option overrides and point the CLI config dir at a temp.
+      for (const k of ["CLAUDE_PLUGIN_OPTION_LMNR_PROJECT_API_KEY", "CLAUDE_PLUGIN_OPTION_LMNR_USER_ID", "LMNR_USER_ID"]) {
+        set(k, undefined);
+      }
+      set("LMNR_PROJECT_API_KEY", "k");
+      set("XDG_CONFIG_HOME", dir);
+
+      // No credentials file and no explicit id → null.
+      assert.equal(getLaminarConfig()!.userId, null);
+
+      // Credentials file present → email wins over user id.
+      fs.mkdirSync(path.join(dir, "lmnr"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "lmnr", "credentials.json"),
+        JSON.stringify({ userEmail: "me@example.com", userId: "u1" })
+      );
+      assert.equal(getLaminarConfig()!.userId, "me@example.com");
+
+      // Explicit env overrides the credentials file.
+      set("LMNR_USER_ID", "explicit");
+      assert.equal(getLaminarConfig()!.userId, "explicit");
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

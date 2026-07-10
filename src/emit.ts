@@ -48,8 +48,8 @@ interface EmittedToolObservationBatch {
 }
 
 // ----------------- Trace naming and tags -----------------
-/** Return 'skill:<name>' tags for every Skill tool invocation in the turn. */
-function collectSkillTags(turn: Turn): string[] {
+/** Return the distinct skill names invoked in the turn (bare names, no prefix). */
+function collectSkillNames(turn: Turn): string[] {
   const names: string[] = [];
   for (const assistantMessage of turn.assistantMsgs) {
     for (const toolUse of getToolUseBlocks(getContentFromRow(assistantMessage))) {
@@ -58,8 +58,8 @@ function collectSkillTags(turn: Turn): string[] {
       }
       const toolInput = toolUse.input;
       const skill = typeof toolInput === "object" && toolInput !== null ? toolInput.skill : null;
-      if (typeof skill === "string" && skill && !names.includes(`skill:${skill}`)) {
-        names.push(`skill:${skill}`);
+      if (typeof skill === "string" && skill && !names.includes(skill)) {
+        names.push(skill);
       }
     }
   }
@@ -83,13 +83,6 @@ function traceDisplayName(sessionId: string, turnNum: number): string {
   return `Claude Code - Turn ${turnNum} (${shortSessionLabel(sessionId)})`;
 }
 
-function getTraceTags(turn: Turn): string[] {
-  const tags = ["claude-code"];
-  if (SKILL_TAGS) {
-    tags.push(...collectSkillTags(turn));
-  }
-  return tags;
-}
 
 // ----------------- Tool spans -----------------
 function getToolInputForObservation(toolUse: Row): Json {
@@ -498,19 +491,31 @@ function buildTraceRootAttributes(
 ): Record<string, Json> {
   const attrs: Record<string, Json> = {
     [`${ASSOC_PREFIX}.session_id`]: sessionId,
-    [`${ASSOC_PREFIX}.tags`]: getTraceTags(turn),
+    // A single coarse discriminator tag; everything else that's constant across
+    // the turn goes in metadata (see below), which the SDKs reserve for
+    // trace-wide values. Per-span detail stays on span attributes.
+    [`${ASSOC_PREFIX}.tags`]: ["claude-code"],
     [`${ASSOC_PREFIX}.metadata.source`]: "claude-code",
     [`${ASSOC_PREFIX}.metadata.turn_number`]: String(turnNum),
     [`${ASSOC_PREFIX}.metadata.transcript`]: getShortTranscriptPathForMetadata(transcriptPath) ?? "",
+    [`${ASSOC_PREFIX}.metadata.os`]: process.platform,
   };
   if (config.userId) {
     attrs[`${ASSOC_PREFIX}.user_id`] = config.userId;
   }
-  // Transcript rows carry the project dir and git branch so traces from
-  // different projects/worktrees are distinguishable in Laminar.
+  // Skills invoked in the turn are constant across its spans → trace metadata.
+  if (SKILL_TAGS) {
+    const skills = collectSkillNames(turn);
+    if (skills.length > 0) {
+      attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
+    }
+  }
+  // Transcript rows carry the project dir, git branch, and Claude Code version
+  // so traces from different projects/worktrees/versions are distinguishable.
   for (const [srcKey, dstKey] of [
     ["cwd", "cwd"],
     ["gitBranch", "git_branch"],
+    ["version", "claude_code_version"],
   ] as const) {
     const value = turn.userMsg[srcKey];
     if (typeof value === "string" && value) {

@@ -77,7 +77,9 @@ describe("OTLP format", () => {
     assert.deepEqual(wireAttr(root, "lmnr.span.type"), { stringValue: "DEFAULT" });
     // arrayValue for tags
     const tags = wireAttr(root, "lmnr.association.properties.tags");
-    assert.ok(tags.arrayValue.values.some((v: any) => v.stringValue === "skill:coding"));
+    assert.ok(tags.arrayValue.values.some((v: any) => v.stringValue === "claude-code"));
+    // skills ride in trace metadata as a string envelope, not tags
+    assert.deepEqual(wireAttr(root, "lmnr.association.properties.metadata.skills"), { stringValue: "coding" });
 
     // intValue for token usage on the LLM span. The OTel JS serializer emits a
     // JSON number here; app-server's OTLP/JSON decoder accepts intValue as
@@ -304,7 +306,7 @@ describe("emitTurn", () => {
     assert.ok(hrToNs(llm.endTime) <= hrToNs(root.endTime));
   });
 
-  it("skill tags", () => {
+  it("skills captured in trace metadata, not tags", () => {
     const emitter = emit([
       userRow("use a skill"),
       assistantRow([{ type: "tool_use", id: "tu_s", name: "Skill", input: { skill: "coding" } }]),
@@ -312,9 +314,12 @@ describe("emitTurn", () => {
       assistantRow([{ type: "text", text: "done" }], { msgId: "m2" }),
     ]);
     const root = spansByName(emitter.spans)["Claude Code - Turn 1 (0123abcd)"]!;
-    const tags = attrs(root)["lmnr.association.properties.tags"] as string[];
-    assert.ok(tags.includes("claude-code"));
-    assert.ok(tags.includes("skill:coding"));
+    const rootAttrs = attrs(root);
+    const tags = rootAttrs["lmnr.association.properties.tags"] as string[];
+    assert.deepEqual(tags, ["claude-code"]);
+    assert.ok(!tags.some((t) => t.startsWith("skill:")));
+    assert.equal(rootAttrs["lmnr.association.properties.metadata.skills"], "coding");
+    assert.equal(rootAttrs["lmnr.association.properties.metadata.os"], process.platform);
   });
 
   it("subagent nested under tool span", () => {

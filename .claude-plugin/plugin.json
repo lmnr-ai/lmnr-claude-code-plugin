@@ -25,10 +25,10 @@
       "description": "Laminar base URL. Keep the default for Laminar Cloud; for self-hosted use e.g. http://localhost:8000",
       "default": "https://api.lmnr.ai"
     },
-    "CC_LMNR_USER_ID": {
+    "LMNR_USER_ID": {
       "type": "string",
       "title": "User id",
-      "description": "Optional user id to associate with traces",
+      "description": "Optional user id to associate with traces. If unset, the identity from `lmnr-cli login` (~/.config/lmnr/credentials.json) is used when present.",
       "default": ""
     },
     "CC_LMNR_DEBUG": {
