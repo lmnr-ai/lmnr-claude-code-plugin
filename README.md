@@ -36,13 +36,15 @@ needed — the runtime bundle is committed to the plugin.
 | `LMNR_PROJECT_API_KEY` | — (required) | Laminar project API key |
 | `LMNR_BASE_URL` | `https://api.lmnr.ai` | Laminar API base URL; for self-hosted use e.g. `http://localhost:8000` |
 | `LMNR_USER_ID` | — | Optional user id attached to traces. If unset, the identity from `lmnr-cli login` (`~/.config/lmnr/credentials.json`) is used when present. |
-| `CC_LMNR_DEBUG` | `false` | Write debug logs to `~/.claude/state/lmnr_hook.log` |
-| `CC_LMNR_MAX_CHARS` | `20000` | Max characters per captured text field |
-| `CC_LMNR_STATE_DIR` | `~/.claude/state` | Directory for the per-session state file, lock, and debug log |
 
 Options can be set in the plugin config or as plain environment variables. If
 you already have `LMNR_PROJECT_API_KEY` exported in your shell, the plugin picks
 it up automatically.
+
+Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
+to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` caps per-field capture
+length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
+(used by the test suite).
 
 ## How it works
 

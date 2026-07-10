@@ -75,11 +75,10 @@ describe("OTLP format", () => {
     const wireAttr = (span: any, key: string) => span.attributes.find((a: any) => a.key === key)?.value;
     // string envelope
     assert.deepEqual(wireAttr(root, "lmnr.span.type"), { stringValue: "DEFAULT" });
-    // arrayValue for tags
-    const tags = wireAttr(root, "lmnr.association.properties.tags");
-    assert.ok(tags.arrayValue.values.some((v: any) => v.stringValue === "claude-code"));
-    // skills ride in trace metadata as a string envelope, not tags
+    // trace context rides in metadata as string envelopes; no tags attribute
+    assert.equal(wireAttr(root, "lmnr.association.properties.tags"), undefined);
     assert.deepEqual(wireAttr(root, "lmnr.association.properties.metadata.skills"), { stringValue: "coding" });
+    assert.deepEqual(wireAttr(root, "lmnr.association.properties.metadata.source"), { stringValue: "claude-code" });
 
     // intValue for token usage on the LLM span. The OTel JS serializer emits a
     // JSON number here; app-server's OTLP/JSON decoder accepts intValue as
@@ -306,7 +305,7 @@ describe("emitTurn", () => {
     assert.ok(hrToNs(llm.endTime) <= hrToNs(root.endTime));
   });
 
-  it("skills captured in trace metadata, not tags", () => {
+  it("skills and os captured in trace metadata; no tags attribute", () => {
     const emitter = emit([
       userRow("use a skill"),
       assistantRow([{ type: "tool_use", id: "tu_s", name: "Skill", input: { skill: "coding" } }]),
@@ -315,11 +314,11 @@ describe("emitTurn", () => {
     ]);
     const root = spansByName(emitter.spans)["Claude Code - Turn 1 (0123abcd)"]!;
     const rootAttrs = attrs(root);
-    const tags = rootAttrs["lmnr.association.properties.tags"] as string[];
-    assert.deepEqual(tags, ["claude-code"]);
-    assert.ok(!tags.some((t) => t.startsWith("skill:")));
+    // Tags are no longer emitted at all.
+    assert.equal(rootAttrs["lmnr.association.properties.tags"], undefined);
     assert.equal(rootAttrs["lmnr.association.properties.metadata.skills"], "coding");
     assert.equal(rootAttrs["lmnr.association.properties.metadata.os"], process.platform);
+    assert.equal(rootAttrs["lmnr.association.properties.metadata.source"], "claude-code");
   });
 
   it("subagent nested under tool span", () => {
