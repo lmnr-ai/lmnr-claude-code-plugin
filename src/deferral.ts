@@ -2,9 +2,78 @@ import { MAX_PENDING_TASK_NOTIFICATIONS } from "./config.js";
 import { debug } from "./logger.js";
 import { getToolUseIdForTaskNotification, isTaskNotificationRow } from "./notifications.js";
 import type { PendingAgentTurn, SessionState } from "./state.js";
+import type { SubagentTranscript } from "./subagents.js";
 import { getContentFromRow, getToolUseBlocks } from "./transcript.js";
-import { isAsyncAgentLaunchResult, type Turn } from "./turns.js";
+import type { ToolResultEntry, Turn } from "./turns.js";
 import type { Row } from "./types.js";
+import { jsonDumps } from "./util.js";
+
+// ----------------- Async-agent launch detection -----------------
+// The lifecycle of an async agent (Task/Agent launched with a deferred result)
+// lives in this module: detect the launch, defer the turn, attribute the
+// task-notification back to it, and pop it once resolved.
+export function getToolResultText(toolResultEntry: ToolResultEntry | undefined): string {
+  if (!toolResultEntry) {
+    return "";
+  }
+  const toolResultContent = toolResultEntry.content;
+  if (typeof toolResultContent === "string") {
+    return toolResultContent;
+  }
+  return jsonDumps(toolResultContent);
+}
+
+/**
+ * Read the structured async marker Claude Code puts on tool_result rows.
+ * Returns null when the row carries no toolUseResult (older Claude Code
+ * versions), so callers can fall back to the launch-text heuristic.
+ */
+export function getAsyncLaunchFlagFromRow(row: Row): boolean | null {
+  const toolUseResult = row.toolUseResult;
+  if (typeof toolUseResult !== "object" || toolUseResult === null) {
+    return null;
+  }
+  return toolUseResult.status === "async_launched" || toolUseResult.isAsync === true;
+}
+
+export function isAsyncAgentLaunchResult(toolResultEntry: ToolResultEntry | undefined): boolean {
+  if (!toolResultEntry) {
+    return false;
+  }
+  // Prefer the structured toolUseResult marker: launch-text matching also
+  // fires on tool results that merely quote it (e.g. reading this file).
+  if (toolResultEntry.isAsyncLaunch != null) {
+    return toolResultEntry.isAsyncLaunch;
+  }
+  const toolResultText = getToolResultText(toolResultEntry);
+  return (
+    toolResultText.includes("Async agent launched successfully") ||
+    (toolResultText.includes("agentId:") &&
+      toolResultText.includes("output_file:") &&
+      toolResultText.includes("You will be notified automatically"))
+  );
+}
+
+// ----------------- Task-id attribution bridge -----------------
+/**
+ * Map each subagent's agentId to the tool_use id that launched it, so a
+ * task-notification carrying only a task-id can still be routed to its turn.
+ */
+export function getTaskIdToToolUseId(
+  subagentTranscriptsByToolUseId?: Record<string, SubagentTranscript>
+): Record<string, string> {
+  const taskIdToToolUseId: Record<string, string> = {};
+  if (!subagentTranscriptsByToolUseId) {
+    return taskIdToToolUseId;
+  }
+  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
+    const agentId = subagent.agentId;
+    if (typeof agentId === "string" && agentId) {
+      taskIdToToolUseId[agentId] = toolUseId;
+    }
+  }
+  return taskIdToToolUseId;
+}
 
 function findPendingAgentTurn(sessionState: SessionState, toolUseId: string): PendingAgentTurn | null {
   for (const pendingTurn of sessionState.pendingAgentTurns) {

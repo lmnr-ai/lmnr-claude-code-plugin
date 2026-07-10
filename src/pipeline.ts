@@ -6,7 +6,12 @@
  * SessionState; the renderer knows none of that.
  */
 import type { LaminarConfig } from "./config.js";
-import { getTurnsToEmit, popAllDeferredAgentTurnRowLists, resolveDeferredAgentTurns } from "./deferral.js";
+import {
+  getTaskIdToToolUseId,
+  getTurnsToEmit,
+  popAllDeferredAgentTurnRowLists,
+  resolveDeferredAgentTurns,
+} from "./deferral.js";
 import { emitTurn } from "./emit.js";
 import { debug, info } from "./logger.js";
 import { isTaskNotificationRow } from "./notifications.js";
@@ -18,7 +23,7 @@ import {
   withStateLock,
   type SessionState,
 } from "./state.js";
-import { getSubagentTranscriptsByToolUseId, getTaskIdToToolUseId, type SubagentTranscript } from "./subagents.js";
+import { getSubagentTranscriptsByToolUseId, type SubagentTranscript } from "./subagents.js";
 import { exportWithTimeout, TraceEmitter } from "./tracer.js";
 import { getUserOrAssistantRoleFromRow, isToolResult, readNewJsonl } from "./transcript.js";
 import { buildTurns, type Turn } from "./turns.js";

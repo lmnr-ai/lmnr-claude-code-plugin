@@ -67,22 +67,6 @@ export function getSubagentTranscriptsByToolUseId(transcriptPath: string): Recor
   return result;
 }
 
-export function getTaskIdToToolUseId(
-  subagentTranscriptsByToolUseId?: Record<string, SubagentTranscript>
-): Record<string, string> {
-  const taskIdToToolUseId: Record<string, string> = {};
-  if (!subagentTranscriptsByToolUseId) {
-    return taskIdToToolUseId;
-  }
-  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
-    const agentId = subagent.agentId;
-    if (typeof agentId === "string" && agentId) {
-      taskIdToToolUseId[agentId] = toolUseId;
-    }
-  }
-  return taskIdToToolUseId;
-}
-
 export function readSubagentJsonl(filePath: string): Row[] | null {
   let lines: string[];
   try {

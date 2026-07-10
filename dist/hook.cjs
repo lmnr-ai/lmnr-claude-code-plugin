@@ -25350,16 +25350,7 @@ function getLatestTimestamp(...timestamps) {
   return latest;
 }
 
-// src/turns.ts
-var TurnAssemblyState = class {
-  currentTurnUserRow = null;
-  assistantMessageIds = [];
-  assistantRowsByMessageId = {};
-  toolResultsById = {};
-  toolUseTimestampsById = {};
-  injectedByToolId = {};
-  currentRows = [];
-};
+// src/deferral.ts
 function getToolResultText(toolResultEntry) {
   if (!toolResultEntry) {
     return "";
@@ -25387,175 +25378,19 @@ function isAsyncAgentLaunchResult(toolResultEntry) {
   const toolResultText = getToolResultText(toolResultEntry);
   return toolResultText.includes("Async agent launched successfully") || toolResultText.includes("agentId:") && toolResultText.includes("output_file:") && toolResultText.includes("You will be notified automatically");
 }
-function mergeAssistantRows(rows) {
-  const last = rows[rows.length - 1] ?? {};
-  const base = { ...last };
-  const lastMessage = last.message;
-  const mergedMessage = typeof lastMessage === "object" && lastMessage !== null ? { ...lastMessage } : {};
-  const mergedContent = [];
-  for (const row of rows) {
-    const messageObj = row.message;
-    if (typeof messageObj !== "object" || messageObj === null) {
-      continue;
-    }
-    const contentBlocks = messageObj.content;
-    if (Array.isArray(contentBlocks)) {
-      mergedContent.push(...contentBlocks);
-    } else if (typeof contentBlocks === "string" && contentBlocks) {
-      mergedContent.push({ type: "text", text: contentBlocks });
+function getTaskIdToToolUseId(subagentTranscriptsByToolUseId) {
+  const taskIdToToolUseId = {};
+  if (!subagentTranscriptsByToolUseId) {
+    return taskIdToToolUseId;
+  }
+  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
+    const agentId = subagent.agentId;
+    if (typeof agentId === "string" && agentId) {
+      taskIdToToolUseId[agentId] = toolUseId;
     }
   }
-  mergedMessage.content = mergedContent;
-  base.message = mergedMessage;
-  return base;
+  return taskIdToToolUseId;
 }
-function buildTurnFromState(state) {
-  if (state.currentTurnUserRow === null) {
-    return null;
-  }
-  if (Object.keys(state.assistantRowsByMessageId).length === 0) {
-    return null;
-  }
-  const mergedAssistantRows = [];
-  for (const messageId of state.assistantMessageIds) {
-    const rowsForId = state.assistantRowsByMessageId[messageId];
-    if (!rowsForId || rowsForId.length === 0) {
-      continue;
-    }
-    mergedAssistantRows.push(mergeAssistantRows(rowsForId));
-  }
-  return {
-    userMsg: state.currentTurnUserRow,
-    assistantMsgs: mergedAssistantRows,
-    toolResultsById: { ...state.toolResultsById },
-    toolUseTimestampsById: { ...state.toolUseTimestampsById },
-    injectedByToolId: { ...state.injectedByToolId },
-    rows: [...state.currentRows]
-  };
-}
-function startNewTurn(row, state) {
-  state.currentTurnUserRow = row;
-  state.assistantMessageIds = [];
-  state.assistantRowsByMessageId = {};
-  state.toolResultsById = {};
-  state.toolUseTimestampsById = {};
-  state.injectedByToolId = {};
-  state.currentRows = [row];
-}
-function addAssistantRow(row, state) {
-  if (state.currentTurnUserRow === null) {
-    return;
-  }
-  const messageId = getMessageId(row) || `noid:${state.assistantMessageIds.length}`;
-  if (!(messageId in state.assistantRowsByMessageId)) {
-    state.assistantMessageIds.push(messageId);
-    state.assistantRowsByMessageId[messageId] = [];
-  }
-  state.assistantRowsByMessageId[messageId].push(row);
-  for (const toolUseBlock of getToolUseBlocks(getContentFromRow(row))) {
-    const toolUseId = toolUseBlock.id;
-    if (toolUseId) {
-      const key = String(toolUseId);
-      if (!(key in state.toolUseTimestampsById)) {
-        state.toolUseTimestampsById[key] = row.timestamp;
-      }
-    }
-  }
-  state.currentRows.push(row);
-}
-function addInjectedContextRow(row, state) {
-  if (!row.isMeta) {
-    return false;
-  }
-  const sourceToolUseId = row.sourceToolUseID;
-  if (sourceToolUseId) {
-    const text = extractTextFromContent(getContentFromRow(row));
-    if (text) {
-      state.injectedByToolId[String(sourceToolUseId)] = text;
-      state.currentRows.push(row);
-    }
-  }
-  return true;
-}
-function addToolResultRow(row, state) {
-  if (!isToolResult(row)) {
-    return false;
-  }
-  state.currentRows.push(row);
-  const rowTimestamp = row.timestamp;
-  const isAsyncLaunch = getAsyncLaunchFlagFromRow(row);
-  for (const toolResultBlock of getToolResultBlocks(getContentFromRow(row))) {
-    const toolUseId = toolResultBlock.tool_use_id;
-    if (toolUseId) {
-      const entry = { content: toolResultBlock.content, timestamp: rowTimestamp };
-      if (isAsyncLaunch !== null) {
-        entry.isAsyncLaunch = isAsyncLaunch;
-      }
-      state.toolResultsById[String(toolUseId)] = entry;
-    }
-  }
-  return true;
-}
-function addTaskNotificationRow(row, state, taskIdToToolUseId) {
-  if (!isTaskNotificationRow(row)) {
-    return false;
-  }
-  if (state.currentTurnUserRow === null) {
-    return true;
-  }
-  const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
-  if (!toolUseId) {
-    state.currentRows.push(row);
-    return true;
-  }
-  const existingResult = state.toolResultsById[toolUseId];
-  if (existingResult) {
-    existingResult.finalContent = getResultFromTaskNotification(row);
-    existingResult.finalTimestamp = row.timestamp;
-  } else {
-    state.toolResultsById[toolUseId] = {
-      content: getResultFromTaskNotification(row),
-      timestamp: row.timestamp
-    };
-  }
-  state.currentRows.push(row);
-  return true;
-}
-function buildTurns(rows, taskIdToToolUseId) {
-  const turns = [];
-  const state = new TurnAssemblyState();
-  for (const row of rows) {
-    if (addInjectedContextRow(row, state)) {
-      continue;
-    }
-    if (addToolResultRow(row, state)) {
-      continue;
-    }
-    if (addTaskNotificationRow(row, state, taskIdToToolUseId)) {
-      continue;
-    }
-    const role = getUserOrAssistantRoleFromRow(row);
-    if (role === "user") {
-      const turn2 = buildTurnFromState(state);
-      if (turn2 !== null) {
-        turns.push(turn2);
-      }
-      startNewTurn(row, state);
-      continue;
-    }
-    if (role === "assistant") {
-      addAssistantRow(row, state);
-      continue;
-    }
-  }
-  const turn = buildTurnFromState(state);
-  if (turn !== null) {
-    turns.push(turn);
-  }
-  return turns;
-}
-
-// src/deferral.ts
 function findPendingAgentTurn(sessionState, toolUseId) {
   for (const pendingTurn of sessionState.pendingAgentTurns) {
     if (pendingTurn.pendingToolUseIds.includes(toolUseId) || pendingTurn.resolvedToolUseIds.includes(toolUseId)) {
@@ -25827,6 +25662,184 @@ async function exportWithTimeout(emitter) {
   }
 }
 
+// src/turns.ts
+var TurnAssemblyState = class {
+  currentTurnUserRow = null;
+  assistantMessageIds = [];
+  assistantRowsByMessageId = {};
+  toolResultsById = {};
+  toolUseTimestampsById = {};
+  injectedByToolId = {};
+  currentRows = [];
+};
+function mergeAssistantRows(rows) {
+  const last = rows[rows.length - 1] ?? {};
+  const base = { ...last };
+  const lastMessage = last.message;
+  const mergedMessage = typeof lastMessage === "object" && lastMessage !== null ? { ...lastMessage } : {};
+  const mergedContent = [];
+  for (const row of rows) {
+    const messageObj = row.message;
+    if (typeof messageObj !== "object" || messageObj === null) {
+      continue;
+    }
+    const contentBlocks = messageObj.content;
+    if (Array.isArray(contentBlocks)) {
+      mergedContent.push(...contentBlocks);
+    } else if (typeof contentBlocks === "string" && contentBlocks) {
+      mergedContent.push({ type: "text", text: contentBlocks });
+    }
+  }
+  mergedMessage.content = mergedContent;
+  base.message = mergedMessage;
+  return base;
+}
+function buildTurnFromState(state) {
+  if (state.currentTurnUserRow === null) {
+    return null;
+  }
+  if (Object.keys(state.assistantRowsByMessageId).length === 0) {
+    return null;
+  }
+  const mergedAssistantRows = [];
+  for (const messageId of state.assistantMessageIds) {
+    const rowsForId = state.assistantRowsByMessageId[messageId];
+    if (!rowsForId || rowsForId.length === 0) {
+      continue;
+    }
+    mergedAssistantRows.push(mergeAssistantRows(rowsForId));
+  }
+  return {
+    userMsg: state.currentTurnUserRow,
+    assistantMsgs: mergedAssistantRows,
+    toolResultsById: { ...state.toolResultsById },
+    toolUseTimestampsById: { ...state.toolUseTimestampsById },
+    injectedByToolId: { ...state.injectedByToolId },
+    rows: [...state.currentRows]
+  };
+}
+function startNewTurn(row, state) {
+  state.currentTurnUserRow = row;
+  state.assistantMessageIds = [];
+  state.assistantRowsByMessageId = {};
+  state.toolResultsById = {};
+  state.toolUseTimestampsById = {};
+  state.injectedByToolId = {};
+  state.currentRows = [row];
+}
+function addAssistantRow(row, state) {
+  if (state.currentTurnUserRow === null) {
+    return;
+  }
+  const messageId = getMessageId(row) || `noid:${state.assistantMessageIds.length}`;
+  if (!(messageId in state.assistantRowsByMessageId)) {
+    state.assistantMessageIds.push(messageId);
+    state.assistantRowsByMessageId[messageId] = [];
+  }
+  state.assistantRowsByMessageId[messageId].push(row);
+  for (const toolUseBlock of getToolUseBlocks(getContentFromRow(row))) {
+    const toolUseId = toolUseBlock.id;
+    if (toolUseId) {
+      const key = String(toolUseId);
+      if (!(key in state.toolUseTimestampsById)) {
+        state.toolUseTimestampsById[key] = row.timestamp;
+      }
+    }
+  }
+  state.currentRows.push(row);
+}
+function addInjectedContextRow(row, state) {
+  if (!row.isMeta) {
+    return false;
+  }
+  const sourceToolUseId = row.sourceToolUseID;
+  if (sourceToolUseId) {
+    const text = extractTextFromContent(getContentFromRow(row));
+    if (text) {
+      state.injectedByToolId[String(sourceToolUseId)] = text;
+      state.currentRows.push(row);
+    }
+  }
+  return true;
+}
+function addToolResultRow(row, state) {
+  if (!isToolResult(row)) {
+    return false;
+  }
+  state.currentRows.push(row);
+  const rowTimestamp = row.timestamp;
+  const isAsyncLaunch = getAsyncLaunchFlagFromRow(row);
+  for (const toolResultBlock of getToolResultBlocks(getContentFromRow(row))) {
+    const toolUseId = toolResultBlock.tool_use_id;
+    if (toolUseId) {
+      const entry = { content: toolResultBlock.content, timestamp: rowTimestamp };
+      if (isAsyncLaunch !== null) {
+        entry.isAsyncLaunch = isAsyncLaunch;
+      }
+      state.toolResultsById[String(toolUseId)] = entry;
+    }
+  }
+  return true;
+}
+function addTaskNotificationRow(row, state, taskIdToToolUseId) {
+  if (!isTaskNotificationRow(row)) {
+    return false;
+  }
+  if (state.currentTurnUserRow === null) {
+    return true;
+  }
+  const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
+  if (!toolUseId) {
+    state.currentRows.push(row);
+    return true;
+  }
+  const existingResult = state.toolResultsById[toolUseId];
+  if (existingResult) {
+    existingResult.finalContent = getResultFromTaskNotification(row);
+    existingResult.finalTimestamp = row.timestamp;
+  } else {
+    state.toolResultsById[toolUseId] = {
+      content: getResultFromTaskNotification(row),
+      timestamp: row.timestamp
+    };
+  }
+  state.currentRows.push(row);
+  return true;
+}
+function buildTurns(rows, taskIdToToolUseId) {
+  const turns = [];
+  const state = new TurnAssemblyState();
+  for (const row of rows) {
+    if (addInjectedContextRow(row, state)) {
+      continue;
+    }
+    if (addToolResultRow(row, state)) {
+      continue;
+    }
+    if (addTaskNotificationRow(row, state, taskIdToToolUseId)) {
+      continue;
+    }
+    const role = getUserOrAssistantRoleFromRow(row);
+    if (role === "user") {
+      const turn2 = buildTurnFromState(state);
+      if (turn2 !== null) {
+        turns.push(turn2);
+      }
+      startNewTurn(row, state);
+      continue;
+    }
+    if (role === "assistant") {
+      addAssistantRow(row, state);
+      continue;
+    }
+  }
+  const turn = buildTurnFromState(state);
+  if (turn !== null) {
+    turns.push(turn);
+  }
+  return turns;
+}
+
 // src/subagents.ts
 var fs3 = __toESM(require("node:fs"), 1);
 var path2 = __toESM(require("node:path"), 1);
@@ -25877,19 +25890,6 @@ function getSubagentTranscriptsByToolUseId(transcriptPath) {
     };
   }
   return result;
-}
-function getTaskIdToToolUseId(subagentTranscriptsByToolUseId) {
-  const taskIdToToolUseId = {};
-  if (!subagentTranscriptsByToolUseId) {
-    return taskIdToToolUseId;
-  }
-  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
-    const agentId = subagent.agentId;
-    if (typeof agentId === "string" && agentId) {
-      taskIdToToolUseId[agentId] = toolUseId;
-    }
-  }
-  return taskIdToToolUseId;
 }
 function readSubagentJsonl(filePath) {
   let lines;
