@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getLaminarConfig } from "./config.js";
-import { emitNewTurnsFromTranscript } from "./emit.js";
+import { emitNewTurnsFromTranscript } from "./pipeline.js";
 import { debug, info } from "./logger.js";
 import { TraceEmitter } from "./tracer.js";
 import type { Row } from "./types.js";

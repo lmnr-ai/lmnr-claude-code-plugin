@@ -12,11 +12,8 @@ import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
 
 import type { LaminarConfig } from "../src/config.js";
-import {
-  emitNewTurnsFromTranscript,
-  emitReadyTurns,
-  emitTurn,
-} from "../src/emit.js";
+import { emitTurn } from "../src/emit.js";
+import { emitNewTurnsFromTranscript, emitReadyTurns } from "../src/pipeline.js";
 import {
   getSessionState,
   getSessionStateKey,
