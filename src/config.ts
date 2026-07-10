@@ -57,7 +57,6 @@ export function lockFile(): string {
 }
 
 export const DEBUG = opt("CC_LMNR_DEBUG").toLowerCase() === "true";
-export const SKILL_TAGS = (opt("CC_LMNR_SKILL_TAGS") || "true").toLowerCase() === "true";
 export const CAPTURE_SKILL_CONTENT = opt("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
 
 function parseMaxChars(): number {

@@ -1,4 +1,4 @@
-import { CAPTURE_SKILL_CONTENT, SKILL_TAGS, type LaminarConfig } from "./config.js";
+import { CAPTURE_SKILL_CONTENT, type LaminarConfig } from "./config.js";
 import {
   extractTextFromContent,
   getContentFromRow,
@@ -489,12 +489,10 @@ function buildTraceRootAttributes(
   turn: Turn,
   transcriptPath: string
 ): Record<string, Json> {
+  // No tags: everything constant across the turn goes in metadata (which the
+  // SDKs reserve for trace-wide values); per-span detail stays on span attributes.
   const attrs: Record<string, Json> = {
     [`${ASSOC_PREFIX}.session_id`]: sessionId,
-    // A single coarse discriminator tag; everything else that's constant across
-    // the turn goes in metadata (see below), which the SDKs reserve for
-    // trace-wide values. Per-span detail stays on span attributes.
-    [`${ASSOC_PREFIX}.tags`]: ["claude-code"],
     [`${ASSOC_PREFIX}.metadata.source`]: "claude-code",
     [`${ASSOC_PREFIX}.metadata.turn_number`]: String(turnNum),
     [`${ASSOC_PREFIX}.metadata.transcript`]: getShortTranscriptPathForMetadata(transcriptPath) ?? "",
@@ -504,11 +502,9 @@ function buildTraceRootAttributes(
     attrs[`${ASSOC_PREFIX}.user_id`] = config.userId;
   }
   // Skills invoked in the turn are constant across its spans → trace metadata.
-  if (SKILL_TAGS) {
-    const skills = collectSkillNames(turn);
-    if (skills.length > 0) {
-      attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
-    }
+  const skills = collectSkillNames(turn);
+  if (skills.length > 0) {
+    attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
   }
   // Transcript rows carry the project dir, git branch, and Claude Code version
   // so traces from different projects/worktrees/versions are distinguishable.

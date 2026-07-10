@@ -25045,7 +25045,6 @@ function lockFile() {
   return path.join(stateDir(), "lmnr_state.lock");
 }
 var DEBUG = opt("CC_LMNR_DEBUG").toLowerCase() === "true";
-var SKILL_TAGS = (opt("CC_LMNR_SKILL_TAGS") || "true").toLowerCase() === "true";
 var CAPTURE_SKILL_CONTENT = opt("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
 function parseMaxChars() {
   const raw = opt("CC_LMNR_MAX_CHARS") || "20000";
@@ -26342,10 +26341,6 @@ function getTurnEndTimestamp(turn) {
 function buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPath) {
   const attrs = {
     [`${ASSOC_PREFIX}.session_id`]: sessionId,
-    // A single coarse discriminator tag; everything else that's constant across
-    // the turn goes in metadata (see below), which the SDKs reserve for
-    // trace-wide values. Per-span detail stays on span attributes.
-    [`${ASSOC_PREFIX}.tags`]: ["claude-code"],
     [`${ASSOC_PREFIX}.metadata.source`]: "claude-code",
     [`${ASSOC_PREFIX}.metadata.turn_number`]: String(turnNum),
     [`${ASSOC_PREFIX}.metadata.transcript`]: getShortTranscriptPathForMetadata(transcriptPath) ?? "",
@@ -26354,11 +26349,9 @@ function buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPa
   if (config.userId) {
     attrs[`${ASSOC_PREFIX}.user_id`] = config.userId;
   }
-  if (SKILL_TAGS) {
-    const skills = collectSkillNames(turn);
-    if (skills.length > 0) {
-      attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
-    }
+  const skills = collectSkillNames(turn);
+  if (skills.length > 0) {
+    attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
   }
   for (const [srcKey, dstKey] of [
     ["cwd", "cwd"],
