@@ -354,6 +354,67 @@ describe("emitTurn", () => {
     }
   });
 
+  it("async subagent + async tool result render on the resolving generation", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-async-"));
+    try {
+      const subJsonl = path.join(dir, "agent-async.jsonl");
+      const subRows = [
+        userRow("async subagent prompt", "2026-07-08T10:00:15.000Z"),
+        assistantRow([{ type: "text", text: "async subagent answer" }], { msgId: "asm1", ts: "2026-07-08T10:00:18.000Z" }),
+      ];
+      fs.writeFileSync(subJsonl, subRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+      const subagents: Record<string, SubagentTranscript> = {
+        tu_task: { path: subJsonl, agentId: "async", agentType: "Explore", description: "async work" },
+      };
+
+      // Launch (m1) -> a generation before resolution (m2) -> task-notification
+      // resolves the launch -> a later generation (m3). The subagent and the
+      // async result must surface only once resolution is reached.
+      const emitter = emit(
+        [
+          userRow("delegate async"),
+          assistantRow([{ type: "tool_use", id: "tu_task", name: "Task", input: { prompt: "go" } }], {
+            msgId: "m1",
+            ts: "2026-07-08T10:00:05.000Z",
+          }),
+          toolResultRow(
+            "tu_task",
+            "Async agent launched successfully\nagentId: async\noutput_file: /x\nYou will be notified automatically",
+            "2026-07-08T10:00:09.000Z",
+            { toolUseResult: { status: "async_launched" } }
+          ),
+          assistantRow([{ type: "text", text: "working on it" }], { msgId: "m2", ts: "2026-07-08T10:00:12.000Z" }),
+          userRow(
+            "<task-notification><tool-use-id>tu_task</tool-use-id><result>async task result</result></task-notification>",
+            "2026-07-08T10:00:20.000Z"
+          ),
+          assistantRow([{ type: "text", text: "all done" }], { msgId: "m3", ts: "2026-07-08T10:00:25.000Z" }),
+        ],
+        subagents
+      );
+
+      const names = spansByName(emitter.spans);
+      // Subagent emitted via the deferred (async) path, still nested under its Task tool span.
+      const toolSpan = names["Task"]!;
+      const subSpan = names["Subagent: async work"]!;
+      assert.equal(subSpan.parentSpanId, toolSpan.spanContext().spanId);
+
+      // The generation right after launch sees the initial launch text; the async
+      // result is folded only into the generation after the notification resolves.
+      const llm2In = JSON.parse(attrs(names["LLM Call 2"]!)["gen_ai.input.messages"]);
+      assert.equal(llm2In[0].tool_call_id, "tu_task");
+      assert.ok(String(llm2In[0].content).includes("Async agent launched"));
+      assert.ok(!String(llm2In[0].content).includes("async task result"));
+
+      const llm3In = JSON.parse(attrs(names["LLM Call 3"]!)["gen_ai.input.messages"]);
+      assert.equal(llm3In[0].tool_call_id, "tu_task");
+      assert.ok(String(llm3In[0].content).includes("async task result"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("user_id attached when configured", () => {
     const emitter = makeEmitter("user-42");
     const turns = buildTurns([userRow("hello"), assistantRow([{ type: "text", text: "hi" }])]);
