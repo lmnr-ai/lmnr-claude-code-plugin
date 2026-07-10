@@ -7,9 +7,11 @@ import { describe, it } from "node:test";
 // Keep the plugin's log/state out of the real ~/.claude/state during tests.
 process.env.CC_LMNR_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-testlog-"));
 
-import { getPendingAgentToolUseIds, getTurnsToEmit } from "../src/deferral.js";
+import { getPendingAgentToolUseIds, getTaskIdToToolUseId, getTurnsToEmit, resolveDeferredAgentTurns } from "../src/deferral.js";
 import { buildGenerationAttributes } from "../src/genai.js";
+import { getResultFromTaskNotification, getToolUseIdForTaskNotification, isTaskNotificationRow } from "../src/notifications.js";
 import { getSessionState, SessionState, updateSessionState, type GlobalState } from "../src/state.js";
+import { getSubagentTranscriptsByToolUseId } from "../src/subagents.js";
 import { extractTextFromContent, getUsageDetailsFromRow, readNewJsonl, truncateText } from "../src/transcript.js";
 import { buildTurns, mergeAssistantRows } from "../src/turns.js";
 import { assistantRow, toolResultRow, userRow } from "./helpers.js";
@@ -212,6 +214,130 @@ describe("async agent deferral", () => {
     const entry = turns[0]!.toolResultsById["tu_agent"]!;
     assert.equal(entry.finalContent, "agent output here");
     assert.deepEqual(getPendingAgentToolUseIds(turns[0]!), []);
+  });
+});
+
+describe("resolveDeferredAgentTurns", () => {
+  const deferredState = () =>
+    new SessionState({
+      pendingAgentTurns: [
+        {
+          pendingToolUseIds: ["tu_agent"],
+          resolvedToolUseIds: [],
+          rows: [userRow("launch agent"), assistantRow([{ type: "tool_use", id: "tu_agent", name: "Agent", input: {} }])],
+        },
+      ],
+    });
+
+  const notif = (inner: string, ts = "2026-07-08T10:05:00.000Z") =>
+    userRow(`<task-notification>${inner}</task-notification>`, ts);
+
+  it("routes a tool-use-id notification to its deferred turn, pops it, and drops it from the batch", () => {
+    const state = deferredState();
+    const notification = notif("<tool-use-id>tu_agent</tool-use-id><result>done</result>");
+    const unrelated = userRow("new prompt", "2026-07-08T10:06:00.000Z");
+
+    const [resolved, remaining] = resolveDeferredAgentTurns([notification, unrelated], state);
+
+    assert.equal(resolved.length, 1);
+    assert.equal(state.pendingAgentTurns.length, 0);
+    assert.ok(resolved[0]!.includes(notification));
+    assert.deepEqual(remaining, [unrelated]);
+  });
+
+  it("resolves a task-id-only notification through the agentId bridge", () => {
+    const state = deferredState();
+    const [resolved] = resolveDeferredAgentTurns([notif("<task-id>agent-xyz</task-id><result>done</result>")], state, {
+      "agent-xyz": "tu_agent",
+    });
+    assert.equal(resolved.length, 1);
+    assert.equal(state.pendingAgentTurns.length, 0);
+  });
+
+  it("stashes an unattributable notification for retry instead of dropping it", () => {
+    const state = deferredState();
+    const [resolved, remaining] = resolveDeferredAgentTurns([notif("<task-id>unknown</task-id><result>done</result>")], state);
+    assert.equal(resolved.length, 0);
+    assert.equal(state.pendingAgentTurns.length, 1);
+    assert.equal(state.pendingTaskNotifications.length, 1);
+    assert.deepEqual(remaining, []);
+  });
+
+  it("retries a previously stashed notification once the bridge can attribute it", () => {
+    const state = deferredState();
+    state.pendingTaskNotifications = [notif("<task-id>agent-xyz</task-id><result>done</result>")];
+    const [resolved] = resolveDeferredAgentTurns([], state, { "agent-xyz": "tu_agent" });
+    assert.equal(resolved.length, 1);
+    assert.equal(state.pendingTaskNotifications.length, 0);
+  });
+
+  it("leaves an unrelated notification in the batch for normal assembly", () => {
+    const state = new SessionState();
+    const notification = notif("<tool-use-id>tu_other</tool-use-id><result>x</result>");
+    const [resolved, remaining] = resolveDeferredAgentTurns([notification], state);
+    assert.equal(resolved.length, 0);
+    assert.deepEqual(remaining, [notification]);
+  });
+});
+
+describe("task-notification parsing", () => {
+  const notif = (inner: string) => userRow(`<task-notification>${inner}</task-notification>`);
+
+  it("detects notification rows by leading tag or origin kind", () => {
+    assert.equal(isTaskNotificationRow(notif("<result>x</result>")), true);
+    assert.equal(isTaskNotificationRow(userRow("a normal prompt")), false);
+    assert.equal(isTaskNotificationRow(userRow("hi", undefined, { origin: { kind: "task-notification" } })), true);
+  });
+
+  it("extracts the result tag, falling back to the full text when absent", () => {
+    assert.equal(getResultFromTaskNotification(notif("<result>the answer</result>")), "the answer");
+    assert.ok(getResultFromTaskNotification(notif("<tool-use-id>t</tool-use-id>")).includes("<tool-use-id>"));
+  });
+
+  it("prefers tool-use-id, else maps task-id via the bridge, else null", () => {
+    assert.equal(getToolUseIdForTaskNotification(notif("<tool-use-id>tu_1</tool-use-id>")), "tu_1");
+    assert.equal(getToolUseIdForTaskNotification(notif("<task-id>a1</task-id>"), { a1: "tu_2" }), "tu_2");
+    assert.equal(getToolUseIdForTaskNotification(notif("<task-id>a1</task-id>")), null);
+    assert.equal(getToolUseIdForTaskNotification(userRow("not a notification")), null);
+  });
+});
+
+describe("subagent transcript discovery", () => {
+  it("maps tool_use ids to subagent transcripts from meta.json files", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-disc-"));
+    try {
+      const transcriptPath = path.join(dir, "session.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      const subDir = path.join(dir, "session", "subagents");
+      fs.mkdirSync(subDir, { recursive: true });
+      fs.writeFileSync(path.join(subDir, "agent-xyz.jsonl"), "{}\n");
+      fs.writeFileSync(
+        path.join(subDir, "agent-xyz.meta.json"),
+        JSON.stringify({ toolUseId: "tu_1", agentType: "Explore", description: "d" })
+      );
+      // A meta.json with no matching .jsonl is ignored.
+      fs.writeFileSync(path.join(subDir, "agent-orphan.meta.json"), JSON.stringify({ toolUseId: "tu_2" }));
+
+      const map = getSubagentTranscriptsByToolUseId(transcriptPath);
+      assert.deepEqual(Object.keys(map), ["tu_1"]);
+      assert.equal(map["tu_1"]!.agentId, "xyz");
+      assert.equal(map["tu_1"]!.agentType, "Explore");
+      // The agentId->toolUseId bridge derives from the same map.
+      assert.deepEqual(getTaskIdToToolUseId(map), { xyz: "tu_1" });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty when there is no subagents directory", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-disc2-"));
+    try {
+      const transcriptPath = path.join(dir, "session.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      assert.deepEqual(getSubagentTranscriptsByToolUseId(transcriptPath), {});
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
