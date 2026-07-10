@@ -30,18 +30,6 @@
       "title": "User id",
       "description": "Optional user id to associate with traces. If unset, the identity from `lmnr-cli login` (~/.config/lmnr/credentials.json) is used when present.",
       "default": ""
-    },
-    "CC_LMNR_DEBUG": {
-      "type": "string",
-      "title": "Debug logging",
-      "description": "Set to 'true' to write debug logs to ~/.claude/state/lmnr_hook.log",
-      "default": "false"
-    },
-    "CC_LMNR_MAX_CHARS": {
-      "type": "string",
-      "title": "Max characters per field",
-      "description": "Max characters kept per captured text field before truncation",
-      "default": "20000"
     }
   }
 }
