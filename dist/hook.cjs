@@ -25672,7 +25672,31 @@ function getTurnsToEmit(turns, sessionState, flushDeferredAgentTurns = false) {
 var crypto2 = __toESM(require("node:crypto"), 1);
 var fs3 = __toESM(require("node:fs"), 1);
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
-var SessionState = class {
+function coerceRows(value) {
+  return Array.isArray(value) ? value : [];
+}
+function coercePendingAgentTurns(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const e = entry;
+    if (!Array.isArray(e.pendingToolUseIds) || !Array.isArray(e.resolvedToolUseIds) || !Array.isArray(e.rows)) {
+      continue;
+    }
+    out.push({
+      pendingToolUseIds: e.pendingToolUseIds.filter((x) => typeof x === "string"),
+      resolvedToolUseIds: e.resolvedToolUseIds.filter((x) => typeof x === "string"),
+      rows: coerceRows(e.rows)
+    });
+  }
+  return out;
+}
+var SessionState = class _SessionState {
   offset;
   // Last byte read from the transcript file.
   buffer;
@@ -25696,6 +25720,29 @@ var SessionState = class {
     this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
     this.pendingTurnRows = init.pendingTurnRows ?? [];
   }
+  /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
+  static fromJSON(raw) {
+    const s = typeof raw === "object" && raw !== null ? raw : {};
+    return new _SessionState({
+      offset: Number(s.offset ?? 0),
+      buffer: String(s.buffer ?? ""),
+      turnCount: Number(s.turnCount ?? 0),
+      pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
+      pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
+      pendingTurnRows: coerceRows(s.pendingTurnRows)
+    });
+  }
+  /** Project to the persisted shape. The `updated` bookkeeping field is stamped by the writer. */
+  toJSON() {
+    return {
+      offset: this.offset,
+      buffer: this.buffer,
+      turnCount: this.turnCount,
+      pendingAgentTurns: this.pendingAgentTurns,
+      pendingTaskNotifications: this.pendingTaskNotifications,
+      pendingTurnRows: this.pendingTurnRows
+    };
+  }
 };
 function loadHookState() {
   try {
@@ -25713,26 +25760,10 @@ function getSessionStateKey(sessionId, transcriptPath) {
   return crypto2.createHash("sha256").update(raw, "utf-8").digest("hex");
 }
 function getSessionState(globalState, key) {
-  const s = globalState[key] ?? {};
-  return new SessionState({
-    offset: Number(s.offset ?? 0),
-    buffer: String(s.buffer ?? ""),
-    turnCount: Number(s.turnCount ?? 0),
-    pendingAgentTurns: Array.isArray(s.pendingAgentTurns) ? s.pendingAgentTurns : [],
-    pendingTaskNotifications: Array.isArray(s.pendingTaskNotifications) ? s.pendingTaskNotifications : [],
-    pendingTurnRows: Array.isArray(s.pendingTurnRows) ? s.pendingTurnRows : []
-  });
+  return SessionState.fromJSON(globalState[key]);
 }
 function updateSessionState(globalState, key, sessionState) {
-  globalState[key] = {
-    offset: sessionState.offset,
-    buffer: sessionState.buffer,
-    turnCount: sessionState.turnCount,
-    pendingAgentTurns: sessionState.pendingAgentTurns,
-    pendingTaskNotifications: sessionState.pendingTaskNotifications,
-    pendingTurnRows: sessionState.pendingTurnRows,
-    updated: (/* @__PURE__ */ new Date()).toISOString()
-  };
+  globalState[key] = { ...sessionState.toJSON(), updated: (/* @__PURE__ */ new Date()).toISOString() };
 }
 function saveHookState(state) {
   try {

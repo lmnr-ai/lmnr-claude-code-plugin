@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import lockfile from "proper-lockfile";
 import { lockFile, stateDir, stateFile } from "./config.js";
 import { info } from "./logger.js";
-import type { Row } from "./types.js";
+import type { Json, Row } from "./types.js";
 
 export type GlobalState = Record<string, any>;
 
@@ -17,6 +17,38 @@ export interface PendingAgentTurn {
   pendingToolUseIds: string[];
   resolvedToolUseIds: string[];
   rows: Row[];
+}
+
+/** Untrusted disk value → Row[] (raw transcript rows pass through as-is). */
+function coerceRows(value: unknown): Row[] {
+  return Array.isArray(value) ? (value as Row[]) : [];
+}
+
+/**
+ * Untrusted disk value → PendingAgentTurn[]. Unlike the scalar fields, these
+ * carry a nested shape, so validate it here rather than trusting Array.isArray
+ * and letting a malformed entry surface deep inside deferral.ts.
+ */
+function coercePendingAgentTurns(value: unknown): PendingAgentTurn[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: PendingAgentTurn[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const e = entry as Record<string, unknown>;
+    if (!Array.isArray(e.pendingToolUseIds) || !Array.isArray(e.resolvedToolUseIds) || !Array.isArray(e.rows)) {
+      continue;
+    }
+    out.push({
+      pendingToolUseIds: e.pendingToolUseIds.filter((x): x is string => typeof x === "string"),
+      resolvedToolUseIds: e.resolvedToolUseIds.filter((x): x is string => typeof x === "string"),
+      rows: coerceRows(e.rows),
+    });
+  }
+  return out;
 }
 
 /** Per-session state persisted between hook runs. */
@@ -42,6 +74,31 @@ export class SessionState {
     this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
     this.pendingTurnRows = init.pendingTurnRows ?? [];
   }
+
+  /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
+  static fromJSON(raw: unknown): SessionState {
+    const s = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+    return new SessionState({
+      offset: Number(s.offset ?? 0),
+      buffer: String(s.buffer ?? ""),
+      turnCount: Number(s.turnCount ?? 0),
+      pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
+      pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
+      pendingTurnRows: coerceRows(s.pendingTurnRows),
+    });
+  }
+
+  /** Project to the persisted shape. The `updated` bookkeeping field is stamped by the writer. */
+  toJSON(): Record<string, Json> {
+    return {
+      offset: this.offset,
+      buffer: this.buffer,
+      turnCount: this.turnCount,
+      pendingAgentTurns: this.pendingAgentTurns as unknown as Json,
+      pendingTaskNotifications: this.pendingTaskNotifications as unknown as Json,
+      pendingTurnRows: this.pendingTurnRows as unknown as Json,
+    };
+  }
 }
 
 export function loadHookState(): GlobalState {
@@ -63,27 +120,11 @@ export function getSessionStateKey(sessionId: string, transcriptPath: string): s
 }
 
 export function getSessionState(globalState: GlobalState, key: string): SessionState {
-  const s = globalState[key] ?? {};
-  return new SessionState({
-    offset: Number(s.offset ?? 0),
-    buffer: String(s.buffer ?? ""),
-    turnCount: Number(s.turnCount ?? 0),
-    pendingAgentTurns: Array.isArray(s.pendingAgentTurns) ? s.pendingAgentTurns : [],
-    pendingTaskNotifications: Array.isArray(s.pendingTaskNotifications) ? s.pendingTaskNotifications : [],
-    pendingTurnRows: Array.isArray(s.pendingTurnRows) ? s.pendingTurnRows : [],
-  });
+  return SessionState.fromJSON(globalState[key]);
 }
 
 export function updateSessionState(globalState: GlobalState, key: string, sessionState: SessionState): void {
-  globalState[key] = {
-    offset: sessionState.offset,
-    buffer: sessionState.buffer,
-    turnCount: sessionState.turnCount,
-    pendingAgentTurns: sessionState.pendingAgentTurns,
-    pendingTaskNotifications: sessionState.pendingTaskNotifications,
-    pendingTurnRows: sessionState.pendingTurnRows,
-    updated: new Date().toISOString(),
-  };
+  globalState[key] = { ...sessionState.toJSON(), updated: new Date().toISOString() };
 }
 
 export function saveHookState(state: GlobalState): void {

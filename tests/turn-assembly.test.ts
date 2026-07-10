@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 process.env.CC_LMNR_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-testlog-"));
 
 import { getPendingAgentToolUseIds, getTurnsToEmit } from "../src/deferral.js";
-import { SessionState } from "../src/state.js";
+import { getSessionState, SessionState, updateSessionState, type GlobalState } from "../src/state.js";
 import { extractTextFromContent, getUsageDetailsFromRow, readNewJsonl, truncateText } from "../src/transcript.js";
 import { buildTurns, mergeAssistantRows } from "../src/turns.js";
 import { assistantRow, toolResultRow, userRow } from "./helpers.js";
@@ -301,5 +301,61 @@ describe("readNewJsonl", () => {
       const [msgs] = readNewJsonl(p, state);
       assert.deepEqual(msgs, [{ c: 3 }]);
     });
+  });
+});
+
+describe("SessionState serialization", () => {
+  it("round-trips populated pending fields across a JSON boundary", () => {
+    const state = new SessionState({
+      offset: 42,
+      buffer: "partial-line",
+      turnCount: 3,
+      pendingAgentTurns: [{ pendingToolUseIds: ["t1"], resolvedToolUseIds: ["t0"], rows: [userRow("held")] }],
+      pendingTaskNotifications: [userRow("<task-notification>x</task-notification>")],
+      pendingTurnRows: [userRow("trailing")],
+    });
+    const global: GlobalState = {};
+    updateSessionState(global, "k", state);
+    // Mirror the on-disk round trip: write → JSON → read.
+    const reloaded = getSessionState(JSON.parse(JSON.stringify(global)), "k");
+
+    assert.equal(reloaded.offset, 42);
+    assert.equal(reloaded.buffer, "partial-line");
+    assert.equal(reloaded.turnCount, 3);
+    assert.equal(reloaded.pendingAgentTurns.length, 1);
+    assert.deepEqual(reloaded.pendingAgentTurns[0]!.pendingToolUseIds, ["t1"]);
+    assert.deepEqual(reloaded.pendingAgentTurns[0]!.resolvedToolUseIds, ["t0"]);
+    assert.equal(reloaded.pendingAgentTurns[0]!.rows.length, 1);
+    assert.equal(reloaded.pendingTaskNotifications.length, 1);
+    assert.equal(reloaded.pendingTurnRows.length, 1);
+  });
+
+  it("drops malformed pendingAgentTurns entries instead of trusting them", () => {
+    const global: GlobalState = {
+      k: {
+        offset: 0,
+        buffer: "",
+        turnCount: 0,
+        pendingAgentTurns: [
+          { pendingToolUseIds: ["ok"], resolvedToolUseIds: [], rows: [] },
+          { pendingToolUseIds: "not-an-array", resolvedToolUseIds: [], rows: [] },
+          null,
+          42,
+        ],
+        pendingTaskNotifications: [],
+        pendingTurnRows: [],
+      },
+    };
+    const reloaded = getSessionState(global, "k");
+    assert.equal(reloaded.pendingAgentTurns.length, 1);
+    assert.deepEqual(reloaded.pendingAgentTurns[0]!.pendingToolUseIds, ["ok"]);
+  });
+
+  it("defaults missing or garbage-typed fields", () => {
+    const reloaded = getSessionState({ k: { pendingAgentTurns: "nope", offset: "x" } }, "k");
+    assert.equal(reloaded.buffer, "");
+    assert.equal(reloaded.turnCount, 0);
+    assert.deepEqual(reloaded.pendingAgentTurns, []);
+    assert.deepEqual(reloaded.pendingTaskNotifications, []);
   });
 });
