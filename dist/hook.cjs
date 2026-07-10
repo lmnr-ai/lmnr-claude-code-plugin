@@ -33,1583 +33,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// node_modules/graceful-fs/polyfills.js
-var require_polyfills = __commonJS({
-  "node_modules/graceful-fs/polyfills.js"(exports2, module2) {
-    var constants = require("constants");
-    var origCwd = process.cwd;
-    var cwd = null;
-    var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
-    process.cwd = function() {
-      if (!cwd)
-        cwd = origCwd.call(process);
-      return cwd;
-    };
-    try {
-      process.cwd();
-    } catch (er) {
-    }
-    if (typeof process.chdir === "function") {
-      chdir = process.chdir;
-      process.chdir = function(d) {
-        cwd = null;
-        chdir.call(process, d);
-      };
-      if (Object.setPrototypeOf) Object.setPrototypeOf(process.chdir, chdir);
-    }
-    var chdir;
-    module2.exports = patch;
-    function patch(fs6) {
-      if (constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
-        patchLchmod(fs6);
-      }
-      if (!fs6.lutimes) {
-        patchLutimes(fs6);
-      }
-      fs6.chown = chownFix(fs6.chown);
-      fs6.fchown = chownFix(fs6.fchown);
-      fs6.lchown = chownFix(fs6.lchown);
-      fs6.chmod = chmodFix(fs6.chmod);
-      fs6.fchmod = chmodFix(fs6.fchmod);
-      fs6.lchmod = chmodFix(fs6.lchmod);
-      fs6.chownSync = chownFixSync(fs6.chownSync);
-      fs6.fchownSync = chownFixSync(fs6.fchownSync);
-      fs6.lchownSync = chownFixSync(fs6.lchownSync);
-      fs6.chmodSync = chmodFixSync(fs6.chmodSync);
-      fs6.fchmodSync = chmodFixSync(fs6.fchmodSync);
-      fs6.lchmodSync = chmodFixSync(fs6.lchmodSync);
-      fs6.stat = statFix(fs6.stat);
-      fs6.fstat = statFix(fs6.fstat);
-      fs6.lstat = statFix(fs6.lstat);
-      fs6.statSync = statFixSync(fs6.statSync);
-      fs6.fstatSync = statFixSync(fs6.fstatSync);
-      fs6.lstatSync = statFixSync(fs6.lstatSync);
-      if (fs6.chmod && !fs6.lchmod) {
-        fs6.lchmod = function(path4, mode, cb) {
-          if (cb) process.nextTick(cb);
-        };
-        fs6.lchmodSync = function() {
-        };
-      }
-      if (fs6.chown && !fs6.lchown) {
-        fs6.lchown = function(path4, uid, gid, cb) {
-          if (cb) process.nextTick(cb);
-        };
-        fs6.lchownSync = function() {
-        };
-      }
-      if (platform === "win32") {
-        fs6.rename = typeof fs6.rename !== "function" ? fs6.rename : function(fs$rename) {
-          function rename(from, to, cb) {
-            var start = Date.now();
-            var backoff = 0;
-            fs$rename(from, to, function CB(er) {
-              if (er && (er.code === "EACCES" || er.code === "EPERM" || er.code === "EBUSY") && Date.now() - start < 6e4) {
-                setTimeout(function() {
-                  fs6.stat(to, function(stater, st) {
-                    if (stater && stater.code === "ENOENT")
-                      fs$rename(from, to, CB);
-                    else
-                      cb(er);
-                  });
-                }, backoff);
-                if (backoff < 100)
-                  backoff += 10;
-                return;
-              }
-              if (cb) cb(er);
-            });
-          }
-          if (Object.setPrototypeOf) Object.setPrototypeOf(rename, fs$rename);
-          return rename;
-        }(fs6.rename);
-      }
-      fs6.read = typeof fs6.read !== "function" ? fs6.read : function(fs$read) {
-        function read(fd, buffer, offset, length, position, callback_) {
-          var callback;
-          if (callback_ && typeof callback_ === "function") {
-            var eagCounter = 0;
-            callback = function(er, _, __) {
-              if (er && er.code === "EAGAIN" && eagCounter < 10) {
-                eagCounter++;
-                return fs$read.call(fs6, fd, buffer, offset, length, position, callback);
-              }
-              callback_.apply(this, arguments);
-            };
-          }
-          return fs$read.call(fs6, fd, buffer, offset, length, position, callback);
-        }
-        if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read);
-        return read;
-      }(fs6.read);
-      fs6.readSync = typeof fs6.readSync !== "function" ? fs6.readSync : /* @__PURE__ */ function(fs$readSync) {
-        return function(fd, buffer, offset, length, position) {
-          var eagCounter = 0;
-          while (true) {
-            try {
-              return fs$readSync.call(fs6, fd, buffer, offset, length, position);
-            } catch (er) {
-              if (er.code === "EAGAIN" && eagCounter < 10) {
-                eagCounter++;
-                continue;
-              }
-              throw er;
-            }
-          }
-        };
-      }(fs6.readSync);
-      function patchLchmod(fs7) {
-        fs7.lchmod = function(path4, mode, callback) {
-          fs7.open(
-            path4,
-            constants.O_WRONLY | constants.O_SYMLINK,
-            mode,
-            function(err, fd) {
-              if (err) {
-                if (callback) callback(err);
-                return;
-              }
-              fs7.fchmod(fd, mode, function(err2) {
-                fs7.close(fd, function(err22) {
-                  if (callback) callback(err2 || err22);
-                });
-              });
-            }
-          );
-        };
-        fs7.lchmodSync = function(path4, mode) {
-          var fd = fs7.openSync(path4, constants.O_WRONLY | constants.O_SYMLINK, mode);
-          var threw = true;
-          var ret;
-          try {
-            ret = fs7.fchmodSync(fd, mode);
-            threw = false;
-          } finally {
-            if (threw) {
-              try {
-                fs7.closeSync(fd);
-              } catch (er) {
-              }
-            } else {
-              fs7.closeSync(fd);
-            }
-          }
-          return ret;
-        };
-      }
-      function patchLutimes(fs7) {
-        if (constants.hasOwnProperty("O_SYMLINK") && fs7.futimes) {
-          fs7.lutimes = function(path4, at, mt, cb) {
-            fs7.open(path4, constants.O_SYMLINK, function(er, fd) {
-              if (er) {
-                if (cb) cb(er);
-                return;
-              }
-              fs7.futimes(fd, at, mt, function(er2) {
-                fs7.close(fd, function(er22) {
-                  if (cb) cb(er2 || er22);
-                });
-              });
-            });
-          };
-          fs7.lutimesSync = function(path4, at, mt) {
-            var fd = fs7.openSync(path4, constants.O_SYMLINK);
-            var ret;
-            var threw = true;
-            try {
-              ret = fs7.futimesSync(fd, at, mt);
-              threw = false;
-            } finally {
-              if (threw) {
-                try {
-                  fs7.closeSync(fd);
-                } catch (er) {
-                }
-              } else {
-                fs7.closeSync(fd);
-              }
-            }
-            return ret;
-          };
-        } else if (fs7.futimes) {
-          fs7.lutimes = function(_a, _b, _c, cb) {
-            if (cb) process.nextTick(cb);
-          };
-          fs7.lutimesSync = function() {
-          };
-        }
-      }
-      function chmodFix(orig) {
-        if (!orig) return orig;
-        return function(target, mode, cb) {
-          return orig.call(fs6, target, mode, function(er) {
-            if (chownErOk(er)) er = null;
-            if (cb) cb.apply(this, arguments);
-          });
-        };
-      }
-      function chmodFixSync(orig) {
-        if (!orig) return orig;
-        return function(target, mode) {
-          try {
-            return orig.call(fs6, target, mode);
-          } catch (er) {
-            if (!chownErOk(er)) throw er;
-          }
-        };
-      }
-      function chownFix(orig) {
-        if (!orig) return orig;
-        return function(target, uid, gid, cb) {
-          return orig.call(fs6, target, uid, gid, function(er) {
-            if (chownErOk(er)) er = null;
-            if (cb) cb.apply(this, arguments);
-          });
-        };
-      }
-      function chownFixSync(orig) {
-        if (!orig) return orig;
-        return function(target, uid, gid) {
-          try {
-            return orig.call(fs6, target, uid, gid);
-          } catch (er) {
-            if (!chownErOk(er)) throw er;
-          }
-        };
-      }
-      function statFix(orig) {
-        if (!orig) return orig;
-        return function(target, options, cb) {
-          if (typeof options === "function") {
-            cb = options;
-            options = null;
-          }
-          function callback(er, stats) {
-            if (stats) {
-              if (stats.uid < 0) stats.uid += 4294967296;
-              if (stats.gid < 0) stats.gid += 4294967296;
-            }
-            if (cb) cb.apply(this, arguments);
-          }
-          return options ? orig.call(fs6, target, options, callback) : orig.call(fs6, target, callback);
-        };
-      }
-      function statFixSync(orig) {
-        if (!orig) return orig;
-        return function(target, options) {
-          var stats = options ? orig.call(fs6, target, options) : orig.call(fs6, target);
-          if (stats) {
-            if (stats.uid < 0) stats.uid += 4294967296;
-            if (stats.gid < 0) stats.gid += 4294967296;
-          }
-          return stats;
-        };
-      }
-      function chownErOk(er) {
-        if (!er)
-          return true;
-        if (er.code === "ENOSYS")
-          return true;
-        var nonroot = !process.getuid || process.getuid() !== 0;
-        if (nonroot) {
-          if (er.code === "EINVAL" || er.code === "EPERM")
-            return true;
-        }
-        return false;
-      }
-    }
-  }
-});
-
-// node_modules/graceful-fs/legacy-streams.js
-var require_legacy_streams = __commonJS({
-  "node_modules/graceful-fs/legacy-streams.js"(exports2, module2) {
-    var Stream = require("stream").Stream;
-    module2.exports = legacy;
-    function legacy(fs6) {
-      return {
-        ReadStream,
-        WriteStream
-      };
-      function ReadStream(path4, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path4, options);
-        Stream.call(this);
-        var self2 = this;
-        this.path = path4;
-        this.fd = null;
-        this.readable = true;
-        this.paused = false;
-        this.flags = "r";
-        this.mode = 438;
-        this.bufferSize = 64 * 1024;
-        options = options || {};
-        var keys = Object.keys(options);
-        for (var index = 0, length = keys.length; index < length; index++) {
-          var key = keys[index];
-          this[key] = options[key];
-        }
-        if (this.encoding) this.setEncoding(this.encoding);
-        if (this.start !== void 0) {
-          if ("number" !== typeof this.start) {
-            throw TypeError("start must be a Number");
-          }
-          if (this.end === void 0) {
-            this.end = Infinity;
-          } else if ("number" !== typeof this.end) {
-            throw TypeError("end must be a Number");
-          }
-          if (this.start > this.end) {
-            throw new Error("start must be <= end");
-          }
-          this.pos = this.start;
-        }
-        if (this.fd !== null) {
-          process.nextTick(function() {
-            self2._read();
-          });
-          return;
-        }
-        fs6.open(this.path, this.flags, this.mode, function(err, fd) {
-          if (err) {
-            self2.emit("error", err);
-            self2.readable = false;
-            return;
-          }
-          self2.fd = fd;
-          self2.emit("open", fd);
-          self2._read();
-        });
-      }
-      function WriteStream(path4, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path4, options);
-        Stream.call(this);
-        this.path = path4;
-        this.fd = null;
-        this.writable = true;
-        this.flags = "w";
-        this.encoding = "binary";
-        this.mode = 438;
-        this.bytesWritten = 0;
-        options = options || {};
-        var keys = Object.keys(options);
-        for (var index = 0, length = keys.length; index < length; index++) {
-          var key = keys[index];
-          this[key] = options[key];
-        }
-        if (this.start !== void 0) {
-          if ("number" !== typeof this.start) {
-            throw TypeError("start must be a Number");
-          }
-          if (this.start < 0) {
-            throw new Error("start must be >= zero");
-          }
-          this.pos = this.start;
-        }
-        this.busy = false;
-        this._queue = [];
-        if (this.fd === null) {
-          this._open = fs6.open;
-          this._queue.push([this._open, this.path, this.flags, this.mode, void 0]);
-          this.flush();
-        }
-      }
-    }
-  }
-});
-
-// node_modules/graceful-fs/clone.js
-var require_clone = __commonJS({
-  "node_modules/graceful-fs/clone.js"(exports2, module2) {
-    "use strict";
-    module2.exports = clone;
-    var getPrototypeOf = Object.getPrototypeOf || function(obj) {
-      return obj.__proto__;
-    };
-    function clone(obj) {
-      if (obj === null || typeof obj !== "object")
-        return obj;
-      if (obj instanceof Object)
-        var copy = { __proto__: getPrototypeOf(obj) };
-      else
-        var copy = /* @__PURE__ */ Object.create(null);
-      Object.getOwnPropertyNames(obj).forEach(function(key) {
-        Object.defineProperty(copy, key, Object.getOwnPropertyDescriptor(obj, key));
-      });
-      return copy;
-    }
-  }
-});
-
-// node_modules/graceful-fs/graceful-fs.js
-var require_graceful_fs = __commonJS({
-  "node_modules/graceful-fs/graceful-fs.js"(exports2, module2) {
-    var fs6 = require("fs");
-    var polyfills = require_polyfills();
-    var legacy = require_legacy_streams();
-    var clone = require_clone();
-    var util = require("util");
-    var gracefulQueue;
-    var previousSymbol;
-    if (typeof Symbol === "function" && typeof Symbol.for === "function") {
-      gracefulQueue = Symbol.for("graceful-fs.queue");
-      previousSymbol = Symbol.for("graceful-fs.previous");
-    } else {
-      gracefulQueue = "___graceful-fs.queue";
-      previousSymbol = "___graceful-fs.previous";
-    }
-    function noop() {
-    }
-    function publishQueue(context2, queue2) {
-      Object.defineProperty(context2, gracefulQueue, {
-        get: function() {
-          return queue2;
-        }
-      });
-    }
-    var debug2 = noop;
-    if (util.debuglog)
-      debug2 = util.debuglog("gfs4");
-    else if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || ""))
-      debug2 = function() {
-        var m = util.format.apply(util, arguments);
-        m = "GFS4: " + m.split(/\n/).join("\nGFS4: ");
-        console.error(m);
-      };
-    if (!fs6[gracefulQueue]) {
-      queue = global[gracefulQueue] || [];
-      publishQueue(fs6, queue);
-      fs6.close = function(fs$close) {
-        function close(fd, cb) {
-          return fs$close.call(fs6, fd, function(err) {
-            if (!err) {
-              resetQueue();
-            }
-            if (typeof cb === "function")
-              cb.apply(this, arguments);
-          });
-        }
-        Object.defineProperty(close, previousSymbol, {
-          value: fs$close
-        });
-        return close;
-      }(fs6.close);
-      fs6.closeSync = function(fs$closeSync) {
-        function closeSync3(fd) {
-          fs$closeSync.apply(fs6, arguments);
-          resetQueue();
-        }
-        Object.defineProperty(closeSync3, previousSymbol, {
-          value: fs$closeSync
-        });
-        return closeSync3;
-      }(fs6.closeSync);
-      if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || "")) {
-        process.on("exit", function() {
-          debug2(fs6[gracefulQueue]);
-          require("assert").equal(fs6[gracefulQueue].length, 0);
-        });
-      }
-    }
-    var queue;
-    if (!global[gracefulQueue]) {
-      publishQueue(global, fs6[gracefulQueue]);
-    }
-    module2.exports = patch(clone(fs6));
-    if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs6.__patched) {
-      module2.exports = patch(fs6);
-      fs6.__patched = true;
-    }
-    function patch(fs7) {
-      polyfills(fs7);
-      fs7.gracefulify = patch;
-      fs7.createReadStream = createReadStream;
-      fs7.createWriteStream = createWriteStream;
-      var fs$readFile = fs7.readFile;
-      fs7.readFile = readFile;
-      function readFile(path4, options, cb) {
-        if (typeof options === "function")
-          cb = options, options = null;
-        return go$readFile(path4, options, cb);
-        function go$readFile(path5, options2, cb2, startTime) {
-          return fs$readFile(path5, options2, function(err) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path5, options2, cb2], err, startTime || Date.now(), Date.now()]);
-            else {
-              if (typeof cb2 === "function")
-                cb2.apply(this, arguments);
-            }
-          });
-        }
-      }
-      var fs$writeFile = fs7.writeFile;
-      fs7.writeFile = writeFile;
-      function writeFile(path4, data, options, cb) {
-        if (typeof options === "function")
-          cb = options, options = null;
-        return go$writeFile(path4, data, options, cb);
-        function go$writeFile(path5, data2, options2, cb2, startTime) {
-          return fs$writeFile(path5, data2, options2, function(err) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
-            else {
-              if (typeof cb2 === "function")
-                cb2.apply(this, arguments);
-            }
-          });
-        }
-      }
-      var fs$appendFile = fs7.appendFile;
-      if (fs$appendFile)
-        fs7.appendFile = appendFile;
-      function appendFile(path4, data, options, cb) {
-        if (typeof options === "function")
-          cb = options, options = null;
-        return go$appendFile(path4, data, options, cb);
-        function go$appendFile(path5, data2, options2, cb2, startTime) {
-          return fs$appendFile(path5, data2, options2, function(err) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
-            else {
-              if (typeof cb2 === "function")
-                cb2.apply(this, arguments);
-            }
-          });
-        }
-      }
-      var fs$copyFile = fs7.copyFile;
-      if (fs$copyFile)
-        fs7.copyFile = copyFile;
-      function copyFile(src, dest, flags, cb) {
-        if (typeof flags === "function") {
-          cb = flags;
-          flags = 0;
-        }
-        return go$copyFile(src, dest, flags, cb);
-        function go$copyFile(src2, dest2, flags2, cb2, startTime) {
-          return fs$copyFile(src2, dest2, flags2, function(err) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$copyFile, [src2, dest2, flags2, cb2], err, startTime || Date.now(), Date.now()]);
-            else {
-              if (typeof cb2 === "function")
-                cb2.apply(this, arguments);
-            }
-          });
-        }
-      }
-      var fs$readdir = fs7.readdir;
-      fs7.readdir = readdir;
-      var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir(path4, options, cb) {
-        if (typeof options === "function")
-          cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path5, options2, cb2, startTime) {
-          return fs$readdir(path5, fs$readdirCallback(
-            path5,
-            options2,
-            cb2,
-            startTime
-          ));
-        } : function go$readdir2(path5, options2, cb2, startTime) {
-          return fs$readdir(path5, options2, fs$readdirCallback(
-            path5,
-            options2,
-            cb2,
-            startTime
-          ));
-        };
-        return go$readdir(path4, options, cb);
-        function fs$readdirCallback(path5, options2, cb2, startTime) {
-          return function(err, files) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([
-                go$readdir,
-                [path5, options2, cb2],
-                err,
-                startTime || Date.now(),
-                Date.now()
-              ]);
-            else {
-              if (files && files.sort)
-                files.sort();
-              if (typeof cb2 === "function")
-                cb2.call(this, err, files);
-            }
-          };
-        }
-      }
-      if (process.version.substr(0, 4) === "v0.8") {
-        var legStreams = legacy(fs7);
-        ReadStream = legStreams.ReadStream;
-        WriteStream = legStreams.WriteStream;
-      }
-      var fs$ReadStream = fs7.ReadStream;
-      if (fs$ReadStream) {
-        ReadStream.prototype = Object.create(fs$ReadStream.prototype);
-        ReadStream.prototype.open = ReadStream$open;
-      }
-      var fs$WriteStream = fs7.WriteStream;
-      if (fs$WriteStream) {
-        WriteStream.prototype = Object.create(fs$WriteStream.prototype);
-        WriteStream.prototype.open = WriteStream$open;
-      }
-      Object.defineProperty(fs7, "ReadStream", {
-        get: function() {
-          return ReadStream;
-        },
-        set: function(val) {
-          ReadStream = val;
-        },
-        enumerable: true,
-        configurable: true
-      });
-      Object.defineProperty(fs7, "WriteStream", {
-        get: function() {
-          return WriteStream;
-        },
-        set: function(val) {
-          WriteStream = val;
-        },
-        enumerable: true,
-        configurable: true
-      });
-      var FileReadStream = ReadStream;
-      Object.defineProperty(fs7, "FileReadStream", {
-        get: function() {
-          return FileReadStream;
-        },
-        set: function(val) {
-          FileReadStream = val;
-        },
-        enumerable: true,
-        configurable: true
-      });
-      var FileWriteStream = WriteStream;
-      Object.defineProperty(fs7, "FileWriteStream", {
-        get: function() {
-          return FileWriteStream;
-        },
-        set: function(val) {
-          FileWriteStream = val;
-        },
-        enumerable: true,
-        configurable: true
-      });
-      function ReadStream(path4, options) {
-        if (this instanceof ReadStream)
-          return fs$ReadStream.apply(this, arguments), this;
-        else
-          return ReadStream.apply(Object.create(ReadStream.prototype), arguments);
-      }
-      function ReadStream$open() {
-        var that = this;
-        open(that.path, that.flags, that.mode, function(err, fd) {
-          if (err) {
-            if (that.autoClose)
-              that.destroy();
-            that.emit("error", err);
-          } else {
-            that.fd = fd;
-            that.emit("open", fd);
-            that.read();
-          }
-        });
-      }
-      function WriteStream(path4, options) {
-        if (this instanceof WriteStream)
-          return fs$WriteStream.apply(this, arguments), this;
-        else
-          return WriteStream.apply(Object.create(WriteStream.prototype), arguments);
-      }
-      function WriteStream$open() {
-        var that = this;
-        open(that.path, that.flags, that.mode, function(err, fd) {
-          if (err) {
-            that.destroy();
-            that.emit("error", err);
-          } else {
-            that.fd = fd;
-            that.emit("open", fd);
-          }
-        });
-      }
-      function createReadStream(path4, options) {
-        return new fs7.ReadStream(path4, options);
-      }
-      function createWriteStream(path4, options) {
-        return new fs7.WriteStream(path4, options);
-      }
-      var fs$open = fs7.open;
-      fs7.open = open;
-      function open(path4, flags, mode, cb) {
-        if (typeof mode === "function")
-          cb = mode, mode = null;
-        return go$open(path4, flags, mode, cb);
-        function go$open(path5, flags2, mode2, cb2, startTime) {
-          return fs$open(path5, flags2, mode2, function(err, fd) {
-            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path5, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
-            else {
-              if (typeof cb2 === "function")
-                cb2.apply(this, arguments);
-            }
-          });
-        }
-      }
-      return fs7;
-    }
-    function enqueue(elem) {
-      debug2("ENQUEUE", elem[0].name, elem[1]);
-      fs6[gracefulQueue].push(elem);
-      retry();
-    }
-    var retryTimer;
-    function resetQueue() {
-      var now = Date.now();
-      for (var i = 0; i < fs6[gracefulQueue].length; ++i) {
-        if (fs6[gracefulQueue][i].length > 2) {
-          fs6[gracefulQueue][i][3] = now;
-          fs6[gracefulQueue][i][4] = now;
-        }
-      }
-      retry();
-    }
-    function retry() {
-      clearTimeout(retryTimer);
-      retryTimer = void 0;
-      if (fs6[gracefulQueue].length === 0)
-        return;
-      var elem = fs6[gracefulQueue].shift();
-      var fn = elem[0];
-      var args = elem[1];
-      var err = elem[2];
-      var startTime = elem[3];
-      var lastTime = elem[4];
-      if (startTime === void 0) {
-        debug2("RETRY", fn.name, args);
-        fn.apply(null, args);
-      } else if (Date.now() - startTime >= 6e4) {
-        debug2("TIMEOUT", fn.name, args);
-        var cb = args.pop();
-        if (typeof cb === "function")
-          cb.call(null, err);
-      } else {
-        var sinceAttempt = Date.now() - lastTime;
-        var sinceStart = Math.max(lastTime - startTime, 1);
-        var desiredDelay = Math.min(sinceStart * 1.2, 100);
-        if (sinceAttempt >= desiredDelay) {
-          debug2("RETRY", fn.name, args);
-          fn.apply(null, args.concat([startTime]));
-        } else {
-          fs6[gracefulQueue].push(elem);
-        }
-      }
-      if (retryTimer === void 0) {
-        retryTimer = setTimeout(retry, 0);
-      }
-    }
-  }
-});
-
-// node_modules/retry/lib/retry_operation.js
-var require_retry_operation = __commonJS({
-  "node_modules/retry/lib/retry_operation.js"(exports2, module2) {
-    function RetryOperation(timeouts, options) {
-      if (typeof options === "boolean") {
-        options = { forever: options };
-      }
-      this._originalTimeouts = JSON.parse(JSON.stringify(timeouts));
-      this._timeouts = timeouts;
-      this._options = options || {};
-      this._maxRetryTime = options && options.maxRetryTime || Infinity;
-      this._fn = null;
-      this._errors = [];
-      this._attempts = 1;
-      this._operationTimeout = null;
-      this._operationTimeoutCb = null;
-      this._timeout = null;
-      this._operationStart = null;
-      if (this._options.forever) {
-        this._cachedTimeouts = this._timeouts.slice(0);
-      }
-    }
-    module2.exports = RetryOperation;
-    RetryOperation.prototype.reset = function() {
-      this._attempts = 1;
-      this._timeouts = this._originalTimeouts;
-    };
-    RetryOperation.prototype.stop = function() {
-      if (this._timeout) {
-        clearTimeout(this._timeout);
-      }
-      this._timeouts = [];
-      this._cachedTimeouts = null;
-    };
-    RetryOperation.prototype.retry = function(err) {
-      if (this._timeout) {
-        clearTimeout(this._timeout);
-      }
-      if (!err) {
-        return false;
-      }
-      var currentTime = (/* @__PURE__ */ new Date()).getTime();
-      if (err && currentTime - this._operationStart >= this._maxRetryTime) {
-        this._errors.unshift(new Error("RetryOperation timeout occurred"));
-        return false;
-      }
-      this._errors.push(err);
-      var timeout = this._timeouts.shift();
-      if (timeout === void 0) {
-        if (this._cachedTimeouts) {
-          this._errors.splice(this._errors.length - 1, this._errors.length);
-          this._timeouts = this._cachedTimeouts.slice(0);
-          timeout = this._timeouts.shift();
-        } else {
-          return false;
-        }
-      }
-      var self2 = this;
-      var timer = setTimeout(function() {
-        self2._attempts++;
-        if (self2._operationTimeoutCb) {
-          self2._timeout = setTimeout(function() {
-            self2._operationTimeoutCb(self2._attempts);
-          }, self2._operationTimeout);
-          if (self2._options.unref) {
-            self2._timeout.unref();
-          }
-        }
-        self2._fn(self2._attempts);
-      }, timeout);
-      if (this._options.unref) {
-        timer.unref();
-      }
-      return true;
-    };
-    RetryOperation.prototype.attempt = function(fn, timeoutOps) {
-      this._fn = fn;
-      if (timeoutOps) {
-        if (timeoutOps.timeout) {
-          this._operationTimeout = timeoutOps.timeout;
-        }
-        if (timeoutOps.cb) {
-          this._operationTimeoutCb = timeoutOps.cb;
-        }
-      }
-      var self2 = this;
-      if (this._operationTimeoutCb) {
-        this._timeout = setTimeout(function() {
-          self2._operationTimeoutCb();
-        }, self2._operationTimeout);
-      }
-      this._operationStart = (/* @__PURE__ */ new Date()).getTime();
-      this._fn(this._attempts);
-    };
-    RetryOperation.prototype.try = function(fn) {
-      console.log("Using RetryOperation.try() is deprecated");
-      this.attempt(fn);
-    };
-    RetryOperation.prototype.start = function(fn) {
-      console.log("Using RetryOperation.start() is deprecated");
-      this.attempt(fn);
-    };
-    RetryOperation.prototype.start = RetryOperation.prototype.try;
-    RetryOperation.prototype.errors = function() {
-      return this._errors;
-    };
-    RetryOperation.prototype.attempts = function() {
-      return this._attempts;
-    };
-    RetryOperation.prototype.mainError = function() {
-      if (this._errors.length === 0) {
-        return null;
-      }
-      var counts = {};
-      var mainError = null;
-      var mainErrorCount = 0;
-      for (var i = 0; i < this._errors.length; i++) {
-        var error = this._errors[i];
-        var message = error.message;
-        var count = (counts[message] || 0) + 1;
-        counts[message] = count;
-        if (count >= mainErrorCount) {
-          mainError = error;
-          mainErrorCount = count;
-        }
-      }
-      return mainError;
-    };
-  }
-});
-
-// node_modules/retry/lib/retry.js
-var require_retry = __commonJS({
-  "node_modules/retry/lib/retry.js"(exports2) {
-    var RetryOperation = require_retry_operation();
-    exports2.operation = function(options) {
-      var timeouts = exports2.timeouts(options);
-      return new RetryOperation(timeouts, {
-        forever: options && options.forever,
-        unref: options && options.unref,
-        maxRetryTime: options && options.maxRetryTime
-      });
-    };
-    exports2.timeouts = function(options) {
-      if (options instanceof Array) {
-        return [].concat(options);
-      }
-      var opts = {
-        retries: 10,
-        factor: 2,
-        minTimeout: 1 * 1e3,
-        maxTimeout: Infinity,
-        randomize: false
-      };
-      for (var key in options) {
-        opts[key] = options[key];
-      }
-      if (opts.minTimeout > opts.maxTimeout) {
-        throw new Error("minTimeout is greater than maxTimeout");
-      }
-      var timeouts = [];
-      for (var i = 0; i < opts.retries; i++) {
-        timeouts.push(this.createTimeout(i, opts));
-      }
-      if (options && options.forever && !timeouts.length) {
-        timeouts.push(this.createTimeout(i, opts));
-      }
-      timeouts.sort(function(a, b) {
-        return a - b;
-      });
-      return timeouts;
-    };
-    exports2.createTimeout = function(attempt, opts) {
-      var random = opts.randomize ? Math.random() + 1 : 1;
-      var timeout = Math.round(random * opts.minTimeout * Math.pow(opts.factor, attempt));
-      timeout = Math.min(timeout, opts.maxTimeout);
-      return timeout;
-    };
-    exports2.wrap = function(obj, options, methods) {
-      if (options instanceof Array) {
-        methods = options;
-        options = null;
-      }
-      if (!methods) {
-        methods = [];
-        for (var key in obj) {
-          if (typeof obj[key] === "function") {
-            methods.push(key);
-          }
-        }
-      }
-      for (var i = 0; i < methods.length; i++) {
-        var method = methods[i];
-        var original = obj[method];
-        obj[method] = function retryWrapper(original2) {
-          var op = exports2.operation(options);
-          var args = Array.prototype.slice.call(arguments, 1);
-          var callback = args.pop();
-          args.push(function(err) {
-            if (op.retry(err)) {
-              return;
-            }
-            if (err) {
-              arguments[0] = op.mainError();
-            }
-            callback.apply(this, arguments);
-          });
-          op.attempt(function() {
-            original2.apply(obj, args);
-          });
-        }.bind(obj, original);
-        obj[method].options = options;
-      }
-    };
-  }
-});
-
-// node_modules/retry/index.js
-var require_retry2 = __commonJS({
-  "node_modules/retry/index.js"(exports2, module2) {
-    module2.exports = require_retry();
-  }
-});
-
-// node_modules/signal-exit/signals.js
-var require_signals = __commonJS({
-  "node_modules/signal-exit/signals.js"(exports2, module2) {
-    module2.exports = [
-      "SIGABRT",
-      "SIGALRM",
-      "SIGHUP",
-      "SIGINT",
-      "SIGTERM"
-    ];
-    if (process.platform !== "win32") {
-      module2.exports.push(
-        "SIGVTALRM",
-        "SIGXCPU",
-        "SIGXFSZ",
-        "SIGUSR2",
-        "SIGTRAP",
-        "SIGSYS",
-        "SIGQUIT",
-        "SIGIOT"
-        // should detect profiler and enable/disable accordingly.
-        // see #21
-        // 'SIGPROF'
-      );
-    }
-    if (process.platform === "linux") {
-      module2.exports.push(
-        "SIGIO",
-        "SIGPOLL",
-        "SIGPWR",
-        "SIGSTKFLT",
-        "SIGUNUSED"
-      );
-    }
-  }
-});
-
-// node_modules/signal-exit/index.js
-var require_signal_exit = __commonJS({
-  "node_modules/signal-exit/index.js"(exports2, module2) {
-    var process2 = global.process;
-    var processOk = function(process3) {
-      return process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
-    };
-    if (!processOk(process2)) {
-      module2.exports = function() {
-        return function() {
-        };
-      };
-    } else {
-      assert = require("assert");
-      signals = require_signals();
-      isWin = /^win/i.test(process2.platform);
-      EE = require("events");
-      if (typeof EE !== "function") {
-        EE = EE.EventEmitter;
-      }
-      if (process2.__signal_exit_emitter__) {
-        emitter = process2.__signal_exit_emitter__;
-      } else {
-        emitter = process2.__signal_exit_emitter__ = new EE();
-        emitter.count = 0;
-        emitter.emitted = {};
-      }
-      if (!emitter.infinite) {
-        emitter.setMaxListeners(Infinity);
-        emitter.infinite = true;
-      }
-      module2.exports = function(cb, opts) {
-        if (!processOk(global.process)) {
-          return function() {
-          };
-        }
-        assert.equal(typeof cb, "function", "a callback must be provided for exit handler");
-        if (loaded === false) {
-          load();
-        }
-        var ev = "exit";
-        if (opts && opts.alwaysLast) {
-          ev = "afterexit";
-        }
-        var remove = function() {
-          emitter.removeListener(ev, cb);
-          if (emitter.listeners("exit").length === 0 && emitter.listeners("afterexit").length === 0) {
-            unload();
-          }
-        };
-        emitter.on(ev, cb);
-        return remove;
-      };
-      unload = function unload2() {
-        if (!loaded || !processOk(global.process)) {
-          return;
-        }
-        loaded = false;
-        signals.forEach(function(sig) {
-          try {
-            process2.removeListener(sig, sigListeners[sig]);
-          } catch (er) {
-          }
-        });
-        process2.emit = originalProcessEmit;
-        process2.reallyExit = originalProcessReallyExit;
-        emitter.count -= 1;
-      };
-      module2.exports.unload = unload;
-      emit = function emit2(event, code, signal) {
-        if (emitter.emitted[event]) {
-          return;
-        }
-        emitter.emitted[event] = true;
-        emitter.emit(event, code, signal);
-      };
-      sigListeners = {};
-      signals.forEach(function(sig) {
-        sigListeners[sig] = function listener() {
-          if (!processOk(global.process)) {
-            return;
-          }
-          var listeners = process2.listeners(sig);
-          if (listeners.length === emitter.count) {
-            unload();
-            emit("exit", null, sig);
-            emit("afterexit", null, sig);
-            if (isWin && sig === "SIGHUP") {
-              sig = "SIGINT";
-            }
-            process2.kill(process2.pid, sig);
-          }
-        };
-      });
-      module2.exports.signals = function() {
-        return signals;
-      };
-      loaded = false;
-      load = function load2() {
-        if (loaded || !processOk(global.process)) {
-          return;
-        }
-        loaded = true;
-        emitter.count += 1;
-        signals = signals.filter(function(sig) {
-          try {
-            process2.on(sig, sigListeners[sig]);
-            return true;
-          } catch (er) {
-            return false;
-          }
-        });
-        process2.emit = processEmit;
-        process2.reallyExit = processReallyExit;
-      };
-      module2.exports.load = load;
-      originalProcessReallyExit = process2.reallyExit;
-      processReallyExit = function processReallyExit2(code) {
-        if (!processOk(global.process)) {
-          return;
-        }
-        process2.exitCode = code || /* istanbul ignore next */
-        0;
-        emit("exit", process2.exitCode, null);
-        emit("afterexit", process2.exitCode, null);
-        originalProcessReallyExit.call(process2, process2.exitCode);
-      };
-      originalProcessEmit = process2.emit;
-      processEmit = function processEmit2(ev, arg) {
-        if (ev === "exit" && processOk(global.process)) {
-          if (arg !== void 0) {
-            process2.exitCode = arg;
-          }
-          var ret = originalProcessEmit.apply(this, arguments);
-          emit("exit", process2.exitCode, null);
-          emit("afterexit", process2.exitCode, null);
-          return ret;
-        } else {
-          return originalProcessEmit.apply(this, arguments);
-        }
-      };
-    }
-    var assert;
-    var signals;
-    var isWin;
-    var EE;
-    var emitter;
-    var unload;
-    var emit;
-    var sigListeners;
-    var loaded;
-    var load;
-    var originalProcessReallyExit;
-    var processReallyExit;
-    var originalProcessEmit;
-    var processEmit;
-  }
-});
-
-// node_modules/proper-lockfile/lib/mtime-precision.js
-var require_mtime_precision = __commonJS({
-  "node_modules/proper-lockfile/lib/mtime-precision.js"(exports2, module2) {
-    "use strict";
-    var cacheSymbol = Symbol();
-    function probe(file, fs6, callback) {
-      const cachedPrecision = fs6[cacheSymbol];
-      if (cachedPrecision) {
-        return fs6.stat(file, (err, stat) => {
-          if (err) {
-            return callback(err);
-          }
-          callback(null, stat.mtime, cachedPrecision);
-        });
-      }
-      const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
-      fs6.utimes(file, mtime, mtime, (err) => {
-        if (err) {
-          return callback(err);
-        }
-        fs6.stat(file, (err2, stat) => {
-          if (err2) {
-            return callback(err2);
-          }
-          const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
-          Object.defineProperty(fs6, cacheSymbol, { value: precision });
-          callback(null, stat.mtime, precision);
-        });
-      });
-    }
-    function getMtime(precision) {
-      let now = Date.now();
-      if (precision === "s") {
-        now = Math.ceil(now / 1e3) * 1e3;
-      }
-      return new Date(now);
-    }
-    module2.exports.probe = probe;
-    module2.exports.getMtime = getMtime;
-  }
-});
-
-// node_modules/proper-lockfile/lib/lockfile.js
-var require_lockfile = __commonJS({
-  "node_modules/proper-lockfile/lib/lockfile.js"(exports2, module2) {
-    "use strict";
-    var path4 = require("path");
-    var fs6 = require_graceful_fs();
-    var retry = require_retry2();
-    var onExit = require_signal_exit();
-    var mtimePrecision = require_mtime_precision();
-    var locks = {};
-    function getLockFile(file, options) {
-      return options.lockfilePath || `${file}.lock`;
-    }
-    function resolveCanonicalPath(file, options, callback) {
-      if (!options.realpath) {
-        return callback(null, path4.resolve(file));
-      }
-      options.fs.realpath(file, callback);
-    }
-    function acquireLock(file, options, callback) {
-      const lockfilePath = getLockFile(file, options);
-      options.fs.mkdir(lockfilePath, (err) => {
-        if (!err) {
-          return mtimePrecision.probe(lockfilePath, options.fs, (err2, mtime, mtimePrecision2) => {
-            if (err2) {
-              options.fs.rmdir(lockfilePath, () => {
-              });
-              return callback(err2);
-            }
-            callback(null, mtime, mtimePrecision2);
-          });
-        }
-        if (err.code !== "EEXIST") {
-          return callback(err);
-        }
-        if (options.stale <= 0) {
-          return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file }));
-        }
-        options.fs.stat(lockfilePath, (err2, stat) => {
-          if (err2) {
-            if (err2.code === "ENOENT") {
-              return acquireLock(file, { ...options, stale: 0 }, callback);
-            }
-            return callback(err2);
-          }
-          if (!isLockStale(stat, options)) {
-            return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file }));
-          }
-          removeLock(file, options, (err3) => {
-            if (err3) {
-              return callback(err3);
-            }
-            acquireLock(file, { ...options, stale: 0 }, callback);
-          });
-        });
-      });
-    }
-    function isLockStale(stat, options) {
-      return stat.mtime.getTime() < Date.now() - options.stale;
-    }
-    function removeLock(file, options, callback) {
-      options.fs.rmdir(getLockFile(file, options), (err) => {
-        if (err && err.code !== "ENOENT") {
-          return callback(err);
-        }
-        callback();
-      });
-    }
-    function updateLock(file, options) {
-      const lock2 = locks[file];
-      if (lock2.updateTimeout) {
-        return;
-      }
-      lock2.updateDelay = lock2.updateDelay || options.update;
-      lock2.updateTimeout = setTimeout(() => {
-        lock2.updateTimeout = null;
-        options.fs.stat(lock2.lockfilePath, (err, stat) => {
-          const isOverThreshold = lock2.lastUpdate + options.stale < Date.now();
-          if (err) {
-            if (err.code === "ENOENT" || isOverThreshold) {
-              return setLockAsCompromised(file, lock2, Object.assign(err, { code: "ECOMPROMISED" }));
-            }
-            lock2.updateDelay = 1e3;
-            return updateLock(file, options);
-          }
-          const isMtimeOurs = lock2.mtime.getTime() === stat.mtime.getTime();
-          if (!isMtimeOurs) {
-            return setLockAsCompromised(
-              file,
-              lock2,
-              Object.assign(
-                new Error("Unable to update lock within the stale threshold"),
-                { code: "ECOMPROMISED" }
-              )
-            );
-          }
-          const mtime = mtimePrecision.getMtime(lock2.mtimePrecision);
-          options.fs.utimes(lock2.lockfilePath, mtime, mtime, (err2) => {
-            const isOverThreshold2 = lock2.lastUpdate + options.stale < Date.now();
-            if (lock2.released) {
-              return;
-            }
-            if (err2) {
-              if (err2.code === "ENOENT" || isOverThreshold2) {
-                return setLockAsCompromised(file, lock2, Object.assign(err2, { code: "ECOMPROMISED" }));
-              }
-              lock2.updateDelay = 1e3;
-              return updateLock(file, options);
-            }
-            lock2.mtime = mtime;
-            lock2.lastUpdate = Date.now();
-            lock2.updateDelay = null;
-            updateLock(file, options);
-          });
-        });
-      }, lock2.updateDelay);
-      if (lock2.updateTimeout.unref) {
-        lock2.updateTimeout.unref();
-      }
-    }
-    function setLockAsCompromised(file, lock2, err) {
-      lock2.released = true;
-      if (lock2.updateTimeout) {
-        clearTimeout(lock2.updateTimeout);
-      }
-      if (locks[file] === lock2) {
-        delete locks[file];
-      }
-      lock2.options.onCompromised(err);
-    }
-    function lock(file, options, callback) {
-      options = {
-        stale: 1e4,
-        update: null,
-        realpath: true,
-        retries: 0,
-        fs: fs6,
-        onCompromised: (err) => {
-          throw err;
-        },
-        ...options
-      };
-      options.retries = options.retries || 0;
-      options.retries = typeof options.retries === "number" ? { retries: options.retries } : options.retries;
-      options.stale = Math.max(options.stale || 0, 2e3);
-      options.update = options.update == null ? options.stale / 2 : options.update || 0;
-      options.update = Math.max(Math.min(options.update, options.stale / 2), 1e3);
-      resolveCanonicalPath(file, options, (err, file2) => {
-        if (err) {
-          return callback(err);
-        }
-        const operation = retry.operation(options.retries);
-        operation.attempt(() => {
-          acquireLock(file2, options, (err2, mtime, mtimePrecision2) => {
-            if (operation.retry(err2)) {
-              return;
-            }
-            if (err2) {
-              return callback(operation.mainError());
-            }
-            const lock2 = locks[file2] = {
-              lockfilePath: getLockFile(file2, options),
-              mtime,
-              mtimePrecision: mtimePrecision2,
-              options,
-              lastUpdate: Date.now()
-            };
-            updateLock(file2, options);
-            callback(null, (releasedCallback) => {
-              if (lock2.released) {
-                return releasedCallback && releasedCallback(Object.assign(new Error("Lock is already released"), { code: "ERELEASED" }));
-              }
-              unlock(file2, { ...options, realpath: false }, releasedCallback);
-            });
-          });
-        });
-      });
-    }
-    function unlock(file, options, callback) {
-      options = {
-        fs: fs6,
-        realpath: true,
-        ...options
-      };
-      resolveCanonicalPath(file, options, (err, file2) => {
-        if (err) {
-          return callback(err);
-        }
-        const lock2 = locks[file2];
-        if (!lock2) {
-          return callback(Object.assign(new Error("Lock is not acquired/owned by you"), { code: "ENOTACQUIRED" }));
-        }
-        lock2.updateTimeout && clearTimeout(lock2.updateTimeout);
-        lock2.released = true;
-        delete locks[file2];
-        removeLock(file2, options, callback);
-      });
-    }
-    function check(file, options, callback) {
-      options = {
-        stale: 1e4,
-        realpath: true,
-        fs: fs6,
-        ...options
-      };
-      options.stale = Math.max(options.stale || 0, 2e3);
-      resolveCanonicalPath(file, options, (err, file2) => {
-        if (err) {
-          return callback(err);
-        }
-        options.fs.stat(getLockFile(file2, options), (err2, stat) => {
-          if (err2) {
-            return err2.code === "ENOENT" ? callback(null, false) : callback(err2);
-          }
-          return callback(null, !isLockStale(stat, options));
-        });
-      });
-    }
-    function getLocks() {
-      return locks;
-    }
-    onExit(() => {
-      for (const file in locks) {
-        const options = locks[file].options;
-        try {
-          options.fs.rmdirSync(getLockFile(file, options));
-        } catch (e) {
-        }
-      }
-    });
-    module2.exports.lock = lock;
-    module2.exports.unlock = unlock;
-    module2.exports.check = check;
-    module2.exports.getLocks = getLocks;
-  }
-});
-
-// node_modules/proper-lockfile/lib/adapter.js
-var require_adapter = __commonJS({
-  "node_modules/proper-lockfile/lib/adapter.js"(exports2, module2) {
-    "use strict";
-    var fs6 = require_graceful_fs();
-    function createSyncFs(fs7) {
-      const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
-      const newFs = { ...fs7 };
-      methods.forEach((method) => {
-        newFs[method] = (...args) => {
-          const callback = args.pop();
-          let ret;
-          try {
-            ret = fs7[`${method}Sync`](...args);
-          } catch (err) {
-            return callback(err);
-          }
-          callback(null, ret);
-        };
-      });
-      return newFs;
-    }
-    function toPromise(method) {
-      return (...args) => new Promise((resolve2, reject) => {
-        args.push((err, result) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve2(result);
-          }
-        });
-        method(...args);
-      });
-    }
-    function toSync(method) {
-      return (...args) => {
-        let err;
-        let result;
-        args.push((_err, _result) => {
-          err = _err;
-          result = _result;
-        });
-        method(...args);
-        if (err) {
-          throw err;
-        }
-        return result;
-      };
-    }
-    function toSyncOptions(options) {
-      options = { ...options };
-      options.fs = createSyncFs(options.fs || fs6);
-      if (typeof options.retries === "number" && options.retries > 0 || options.retries && typeof options.retries.retries === "number" && options.retries.retries > 0) {
-        throw Object.assign(new Error("Cannot use retries with the sync api"), { code: "ESYNC" });
-      }
-      return options;
-    }
-    module2.exports = {
-      toPromise,
-      toSync,
-      toSyncOptions
-    };
-  }
-});
-
-// node_modules/proper-lockfile/index.js
-var require_proper_lockfile = __commonJS({
-  "node_modules/proper-lockfile/index.js"(exports2, module2) {
-    "use strict";
-    var lockfile2 = require_lockfile();
-    var { toPromise, toSync, toSyncOptions } = require_adapter();
-    async function lock(file, options) {
-      const release = await toPromise(lockfile2.lock)(file, options);
-      return toPromise(release);
-    }
-    function lockSync(file, options) {
-      const release = toSync(lockfile2.lock)(file, toSyncOptions(options));
-      return toSync(release);
-    }
-    function unlock(file, options) {
-      return toPromise(lockfile2.unlock)(file, options);
-    }
-    function unlockSync(file, options) {
-      return toSync(lockfile2.unlock)(file, toSyncOptions(options));
-    }
-    function check(file, options) {
-      return toPromise(lockfile2.check)(file, options);
-    }
-    function checkSync(file, options) {
-      return toSync(lockfile2.check)(file, toSyncOptions(options));
-    }
-    module2.exports = lock;
-    module2.exports.lock = lock;
-    module2.exports.unlock = unlock;
-    module2.exports.lockSync = lockSync;
-    module2.exports.unlockSync = unlockSync;
-    module2.exports.check = check;
-    module2.exports.checkSync = checkSync;
-  }
-});
-
 // node_modules/@opentelemetry/api/build/esm/version.js
 var VERSION;
 var init_version = __esm({
@@ -24996,16 +23419,1618 @@ var require_src6 = __commonJS({
   }
 });
 
+// node_modules/graceful-fs/polyfills.js
+var require_polyfills = __commonJS({
+  "node_modules/graceful-fs/polyfills.js"(exports2, module2) {
+    var constants = require("constants");
+    var origCwd = process.cwd;
+    var cwd = null;
+    var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
+    process.cwd = function() {
+      if (!cwd)
+        cwd = origCwd.call(process);
+      return cwd;
+    };
+    try {
+      process.cwd();
+    } catch (er) {
+    }
+    if (typeof process.chdir === "function") {
+      chdir = process.chdir;
+      process.chdir = function(d) {
+        cwd = null;
+        chdir.call(process, d);
+      };
+      if (Object.setPrototypeOf) Object.setPrototypeOf(process.chdir, chdir);
+    }
+    var chdir;
+    module2.exports = patch;
+    function patch(fs7) {
+      if (constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+        patchLchmod(fs7);
+      }
+      if (!fs7.lutimes) {
+        patchLutimes(fs7);
+      }
+      fs7.chown = chownFix(fs7.chown);
+      fs7.fchown = chownFix(fs7.fchown);
+      fs7.lchown = chownFix(fs7.lchown);
+      fs7.chmod = chmodFix(fs7.chmod);
+      fs7.fchmod = chmodFix(fs7.fchmod);
+      fs7.lchmod = chmodFix(fs7.lchmod);
+      fs7.chownSync = chownFixSync(fs7.chownSync);
+      fs7.fchownSync = chownFixSync(fs7.fchownSync);
+      fs7.lchownSync = chownFixSync(fs7.lchownSync);
+      fs7.chmodSync = chmodFixSync(fs7.chmodSync);
+      fs7.fchmodSync = chmodFixSync(fs7.fchmodSync);
+      fs7.lchmodSync = chmodFixSync(fs7.lchmodSync);
+      fs7.stat = statFix(fs7.stat);
+      fs7.fstat = statFix(fs7.fstat);
+      fs7.lstat = statFix(fs7.lstat);
+      fs7.statSync = statFixSync(fs7.statSync);
+      fs7.fstatSync = statFixSync(fs7.fstatSync);
+      fs7.lstatSync = statFixSync(fs7.lstatSync);
+      if (fs7.chmod && !fs7.lchmod) {
+        fs7.lchmod = function(path4, mode, cb) {
+          if (cb) process.nextTick(cb);
+        };
+        fs7.lchmodSync = function() {
+        };
+      }
+      if (fs7.chown && !fs7.lchown) {
+        fs7.lchown = function(path4, uid, gid, cb) {
+          if (cb) process.nextTick(cb);
+        };
+        fs7.lchownSync = function() {
+        };
+      }
+      if (platform === "win32") {
+        fs7.rename = typeof fs7.rename !== "function" ? fs7.rename : function(fs$rename) {
+          function rename(from, to, cb) {
+            var start = Date.now();
+            var backoff = 0;
+            fs$rename(from, to, function CB(er) {
+              if (er && (er.code === "EACCES" || er.code === "EPERM" || er.code === "EBUSY") && Date.now() - start < 6e4) {
+                setTimeout(function() {
+                  fs7.stat(to, function(stater, st) {
+                    if (stater && stater.code === "ENOENT")
+                      fs$rename(from, to, CB);
+                    else
+                      cb(er);
+                  });
+                }, backoff);
+                if (backoff < 100)
+                  backoff += 10;
+                return;
+              }
+              if (cb) cb(er);
+            });
+          }
+          if (Object.setPrototypeOf) Object.setPrototypeOf(rename, fs$rename);
+          return rename;
+        }(fs7.rename);
+      }
+      fs7.read = typeof fs7.read !== "function" ? fs7.read : function(fs$read) {
+        function read(fd, buffer, offset, length, position, callback_) {
+          var callback;
+          if (callback_ && typeof callback_ === "function") {
+            var eagCounter = 0;
+            callback = function(er, _, __) {
+              if (er && er.code === "EAGAIN" && eagCounter < 10) {
+                eagCounter++;
+                return fs$read.call(fs7, fd, buffer, offset, length, position, callback);
+              }
+              callback_.apply(this, arguments);
+            };
+          }
+          return fs$read.call(fs7, fd, buffer, offset, length, position, callback);
+        }
+        if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read);
+        return read;
+      }(fs7.read);
+      fs7.readSync = typeof fs7.readSync !== "function" ? fs7.readSync : /* @__PURE__ */ function(fs$readSync) {
+        return function(fd, buffer, offset, length, position) {
+          var eagCounter = 0;
+          while (true) {
+            try {
+              return fs$readSync.call(fs7, fd, buffer, offset, length, position);
+            } catch (er) {
+              if (er.code === "EAGAIN" && eagCounter < 10) {
+                eagCounter++;
+                continue;
+              }
+              throw er;
+            }
+          }
+        };
+      }(fs7.readSync);
+      function patchLchmod(fs8) {
+        fs8.lchmod = function(path4, mode, callback) {
+          fs8.open(
+            path4,
+            constants.O_WRONLY | constants.O_SYMLINK,
+            mode,
+            function(err, fd) {
+              if (err) {
+                if (callback) callback(err);
+                return;
+              }
+              fs8.fchmod(fd, mode, function(err2) {
+                fs8.close(fd, function(err22) {
+                  if (callback) callback(err2 || err22);
+                });
+              });
+            }
+          );
+        };
+        fs8.lchmodSync = function(path4, mode) {
+          var fd = fs8.openSync(path4, constants.O_WRONLY | constants.O_SYMLINK, mode);
+          var threw = true;
+          var ret;
+          try {
+            ret = fs8.fchmodSync(fd, mode);
+            threw = false;
+          } finally {
+            if (threw) {
+              try {
+                fs8.closeSync(fd);
+              } catch (er) {
+              }
+            } else {
+              fs8.closeSync(fd);
+            }
+          }
+          return ret;
+        };
+      }
+      function patchLutimes(fs8) {
+        if (constants.hasOwnProperty("O_SYMLINK") && fs8.futimes) {
+          fs8.lutimes = function(path4, at, mt, cb) {
+            fs8.open(path4, constants.O_SYMLINK, function(er, fd) {
+              if (er) {
+                if (cb) cb(er);
+                return;
+              }
+              fs8.futimes(fd, at, mt, function(er2) {
+                fs8.close(fd, function(er22) {
+                  if (cb) cb(er2 || er22);
+                });
+              });
+            });
+          };
+          fs8.lutimesSync = function(path4, at, mt) {
+            var fd = fs8.openSync(path4, constants.O_SYMLINK);
+            var ret;
+            var threw = true;
+            try {
+              ret = fs8.futimesSync(fd, at, mt);
+              threw = false;
+            } finally {
+              if (threw) {
+                try {
+                  fs8.closeSync(fd);
+                } catch (er) {
+                }
+              } else {
+                fs8.closeSync(fd);
+              }
+            }
+            return ret;
+          };
+        } else if (fs8.futimes) {
+          fs8.lutimes = function(_a, _b, _c, cb) {
+            if (cb) process.nextTick(cb);
+          };
+          fs8.lutimesSync = function() {
+          };
+        }
+      }
+      function chmodFix(orig) {
+        if (!orig) return orig;
+        return function(target, mode, cb) {
+          return orig.call(fs7, target, mode, function(er) {
+            if (chownErOk(er)) er = null;
+            if (cb) cb.apply(this, arguments);
+          });
+        };
+      }
+      function chmodFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, mode) {
+          try {
+            return orig.call(fs7, target, mode);
+          } catch (er) {
+            if (!chownErOk(er)) throw er;
+          }
+        };
+      }
+      function chownFix(orig) {
+        if (!orig) return orig;
+        return function(target, uid, gid, cb) {
+          return orig.call(fs7, target, uid, gid, function(er) {
+            if (chownErOk(er)) er = null;
+            if (cb) cb.apply(this, arguments);
+          });
+        };
+      }
+      function chownFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, uid, gid) {
+          try {
+            return orig.call(fs7, target, uid, gid);
+          } catch (er) {
+            if (!chownErOk(er)) throw er;
+          }
+        };
+      }
+      function statFix(orig) {
+        if (!orig) return orig;
+        return function(target, options, cb) {
+          if (typeof options === "function") {
+            cb = options;
+            options = null;
+          }
+          function callback(er, stats) {
+            if (stats) {
+              if (stats.uid < 0) stats.uid += 4294967296;
+              if (stats.gid < 0) stats.gid += 4294967296;
+            }
+            if (cb) cb.apply(this, arguments);
+          }
+          return options ? orig.call(fs7, target, options, callback) : orig.call(fs7, target, callback);
+        };
+      }
+      function statFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, options) {
+          var stats = options ? orig.call(fs7, target, options) : orig.call(fs7, target);
+          if (stats) {
+            if (stats.uid < 0) stats.uid += 4294967296;
+            if (stats.gid < 0) stats.gid += 4294967296;
+          }
+          return stats;
+        };
+      }
+      function chownErOk(er) {
+        if (!er)
+          return true;
+        if (er.code === "ENOSYS")
+          return true;
+        var nonroot = !process.getuid || process.getuid() !== 0;
+        if (nonroot) {
+          if (er.code === "EINVAL" || er.code === "EPERM")
+            return true;
+        }
+        return false;
+      }
+    }
+  }
+});
+
+// node_modules/graceful-fs/legacy-streams.js
+var require_legacy_streams = __commonJS({
+  "node_modules/graceful-fs/legacy-streams.js"(exports2, module2) {
+    var Stream = require("stream").Stream;
+    module2.exports = legacy;
+    function legacy(fs7) {
+      return {
+        ReadStream,
+        WriteStream
+      };
+      function ReadStream(path4, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path4, options);
+        Stream.call(this);
+        var self2 = this;
+        this.path = path4;
+        this.fd = null;
+        this.readable = true;
+        this.paused = false;
+        this.flags = "r";
+        this.mode = 438;
+        this.bufferSize = 64 * 1024;
+        options = options || {};
+        var keys = Object.keys(options);
+        for (var index = 0, length = keys.length; index < length; index++) {
+          var key = keys[index];
+          this[key] = options[key];
+        }
+        if (this.encoding) this.setEncoding(this.encoding);
+        if (this.start !== void 0) {
+          if ("number" !== typeof this.start) {
+            throw TypeError("start must be a Number");
+          }
+          if (this.end === void 0) {
+            this.end = Infinity;
+          } else if ("number" !== typeof this.end) {
+            throw TypeError("end must be a Number");
+          }
+          if (this.start > this.end) {
+            throw new Error("start must be <= end");
+          }
+          this.pos = this.start;
+        }
+        if (this.fd !== null) {
+          process.nextTick(function() {
+            self2._read();
+          });
+          return;
+        }
+        fs7.open(this.path, this.flags, this.mode, function(err, fd) {
+          if (err) {
+            self2.emit("error", err);
+            self2.readable = false;
+            return;
+          }
+          self2.fd = fd;
+          self2.emit("open", fd);
+          self2._read();
+        });
+      }
+      function WriteStream(path4, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path4, options);
+        Stream.call(this);
+        this.path = path4;
+        this.fd = null;
+        this.writable = true;
+        this.flags = "w";
+        this.encoding = "binary";
+        this.mode = 438;
+        this.bytesWritten = 0;
+        options = options || {};
+        var keys = Object.keys(options);
+        for (var index = 0, length = keys.length; index < length; index++) {
+          var key = keys[index];
+          this[key] = options[key];
+        }
+        if (this.start !== void 0) {
+          if ("number" !== typeof this.start) {
+            throw TypeError("start must be a Number");
+          }
+          if (this.start < 0) {
+            throw new Error("start must be >= zero");
+          }
+          this.pos = this.start;
+        }
+        this.busy = false;
+        this._queue = [];
+        if (this.fd === null) {
+          this._open = fs7.open;
+          this._queue.push([this._open, this.path, this.flags, this.mode, void 0]);
+          this.flush();
+        }
+      }
+    }
+  }
+});
+
+// node_modules/graceful-fs/clone.js
+var require_clone = __commonJS({
+  "node_modules/graceful-fs/clone.js"(exports2, module2) {
+    "use strict";
+    module2.exports = clone;
+    var getPrototypeOf = Object.getPrototypeOf || function(obj) {
+      return obj.__proto__;
+    };
+    function clone(obj) {
+      if (obj === null || typeof obj !== "object")
+        return obj;
+      if (obj instanceof Object)
+        var copy = { __proto__: getPrototypeOf(obj) };
+      else
+        var copy = /* @__PURE__ */ Object.create(null);
+      Object.getOwnPropertyNames(obj).forEach(function(key) {
+        Object.defineProperty(copy, key, Object.getOwnPropertyDescriptor(obj, key));
+      });
+      return copy;
+    }
+  }
+});
+
+// node_modules/graceful-fs/graceful-fs.js
+var require_graceful_fs = __commonJS({
+  "node_modules/graceful-fs/graceful-fs.js"(exports2, module2) {
+    var fs7 = require("fs");
+    var polyfills = require_polyfills();
+    var legacy = require_legacy_streams();
+    var clone = require_clone();
+    var util = require("util");
+    var gracefulQueue;
+    var previousSymbol;
+    if (typeof Symbol === "function" && typeof Symbol.for === "function") {
+      gracefulQueue = Symbol.for("graceful-fs.queue");
+      previousSymbol = Symbol.for("graceful-fs.previous");
+    } else {
+      gracefulQueue = "___graceful-fs.queue";
+      previousSymbol = "___graceful-fs.previous";
+    }
+    function noop() {
+    }
+    function publishQueue(context2, queue2) {
+      Object.defineProperty(context2, gracefulQueue, {
+        get: function() {
+          return queue2;
+        }
+      });
+    }
+    var debug2 = noop;
+    if (util.debuglog)
+      debug2 = util.debuglog("gfs4");
+    else if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || ""))
+      debug2 = function() {
+        var m = util.format.apply(util, arguments);
+        m = "GFS4: " + m.split(/\n/).join("\nGFS4: ");
+        console.error(m);
+      };
+    if (!fs7[gracefulQueue]) {
+      queue = global[gracefulQueue] || [];
+      publishQueue(fs7, queue);
+      fs7.close = function(fs$close) {
+        function close(fd, cb) {
+          return fs$close.call(fs7, fd, function(err) {
+            if (!err) {
+              resetQueue();
+            }
+            if (typeof cb === "function")
+              cb.apply(this, arguments);
+          });
+        }
+        Object.defineProperty(close, previousSymbol, {
+          value: fs$close
+        });
+        return close;
+      }(fs7.close);
+      fs7.closeSync = function(fs$closeSync) {
+        function closeSync3(fd) {
+          fs$closeSync.apply(fs7, arguments);
+          resetQueue();
+        }
+        Object.defineProperty(closeSync3, previousSymbol, {
+          value: fs$closeSync
+        });
+        return closeSync3;
+      }(fs7.closeSync);
+      if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || "")) {
+        process.on("exit", function() {
+          debug2(fs7[gracefulQueue]);
+          require("assert").equal(fs7[gracefulQueue].length, 0);
+        });
+      }
+    }
+    var queue;
+    if (!global[gracefulQueue]) {
+      publishQueue(global, fs7[gracefulQueue]);
+    }
+    module2.exports = patch(clone(fs7));
+    if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs7.__patched) {
+      module2.exports = patch(fs7);
+      fs7.__patched = true;
+    }
+    function patch(fs8) {
+      polyfills(fs8);
+      fs8.gracefulify = patch;
+      fs8.createReadStream = createReadStream;
+      fs8.createWriteStream = createWriteStream;
+      var fs$readFile = fs8.readFile;
+      fs8.readFile = readFile;
+      function readFile(path4, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$readFile(path4, options, cb);
+        function go$readFile(path5, options2, cb2, startTime) {
+          return fs$readFile(path5, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$readFile, [path5, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$writeFile = fs8.writeFile;
+      fs8.writeFile = writeFile;
+      function writeFile(path4, data, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$writeFile(path4, data, options, cb);
+        function go$writeFile(path5, data2, options2, cb2, startTime) {
+          return fs$writeFile(path5, data2, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$writeFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$appendFile = fs8.appendFile;
+      if (fs$appendFile)
+        fs8.appendFile = appendFile;
+      function appendFile(path4, data, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$appendFile(path4, data, options, cb);
+        function go$appendFile(path5, data2, options2, cb2, startTime) {
+          return fs$appendFile(path5, data2, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$appendFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$copyFile = fs8.copyFile;
+      if (fs$copyFile)
+        fs8.copyFile = copyFile;
+      function copyFile(src, dest, flags, cb) {
+        if (typeof flags === "function") {
+          cb = flags;
+          flags = 0;
+        }
+        return go$copyFile(src, dest, flags, cb);
+        function go$copyFile(src2, dest2, flags2, cb2, startTime) {
+          return fs$copyFile(src2, dest2, flags2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$copyFile, [src2, dest2, flags2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$readdir = fs8.readdir;
+      fs8.readdir = readdir;
+      var noReaddirOptionVersions = /^v[0-5]\./;
+      function readdir(path4, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path5, options2, cb2, startTime) {
+          return fs$readdir(path5, fs$readdirCallback(
+            path5,
+            options2,
+            cb2,
+            startTime
+          ));
+        } : function go$readdir2(path5, options2, cb2, startTime) {
+          return fs$readdir(path5, options2, fs$readdirCallback(
+            path5,
+            options2,
+            cb2,
+            startTime
+          ));
+        };
+        return go$readdir(path4, options, cb);
+        function fs$readdirCallback(path5, options2, cb2, startTime) {
+          return function(err, files) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([
+                go$readdir,
+                [path5, options2, cb2],
+                err,
+                startTime || Date.now(),
+                Date.now()
+              ]);
+            else {
+              if (files && files.sort)
+                files.sort();
+              if (typeof cb2 === "function")
+                cb2.call(this, err, files);
+            }
+          };
+        }
+      }
+      if (process.version.substr(0, 4) === "v0.8") {
+        var legStreams = legacy(fs8);
+        ReadStream = legStreams.ReadStream;
+        WriteStream = legStreams.WriteStream;
+      }
+      var fs$ReadStream = fs8.ReadStream;
+      if (fs$ReadStream) {
+        ReadStream.prototype = Object.create(fs$ReadStream.prototype);
+        ReadStream.prototype.open = ReadStream$open;
+      }
+      var fs$WriteStream = fs8.WriteStream;
+      if (fs$WriteStream) {
+        WriteStream.prototype = Object.create(fs$WriteStream.prototype);
+        WriteStream.prototype.open = WriteStream$open;
+      }
+      Object.defineProperty(fs8, "ReadStream", {
+        get: function() {
+          return ReadStream;
+        },
+        set: function(val) {
+          ReadStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      Object.defineProperty(fs8, "WriteStream", {
+        get: function() {
+          return WriteStream;
+        },
+        set: function(val) {
+          WriteStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      var FileReadStream = ReadStream;
+      Object.defineProperty(fs8, "FileReadStream", {
+        get: function() {
+          return FileReadStream;
+        },
+        set: function(val) {
+          FileReadStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      var FileWriteStream = WriteStream;
+      Object.defineProperty(fs8, "FileWriteStream", {
+        get: function() {
+          return FileWriteStream;
+        },
+        set: function(val) {
+          FileWriteStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      function ReadStream(path4, options) {
+        if (this instanceof ReadStream)
+          return fs$ReadStream.apply(this, arguments), this;
+        else
+          return ReadStream.apply(Object.create(ReadStream.prototype), arguments);
+      }
+      function ReadStream$open() {
+        var that = this;
+        open(that.path, that.flags, that.mode, function(err, fd) {
+          if (err) {
+            if (that.autoClose)
+              that.destroy();
+            that.emit("error", err);
+          } else {
+            that.fd = fd;
+            that.emit("open", fd);
+            that.read();
+          }
+        });
+      }
+      function WriteStream(path4, options) {
+        if (this instanceof WriteStream)
+          return fs$WriteStream.apply(this, arguments), this;
+        else
+          return WriteStream.apply(Object.create(WriteStream.prototype), arguments);
+      }
+      function WriteStream$open() {
+        var that = this;
+        open(that.path, that.flags, that.mode, function(err, fd) {
+          if (err) {
+            that.destroy();
+            that.emit("error", err);
+          } else {
+            that.fd = fd;
+            that.emit("open", fd);
+          }
+        });
+      }
+      function createReadStream(path4, options) {
+        return new fs8.ReadStream(path4, options);
+      }
+      function createWriteStream(path4, options) {
+        return new fs8.WriteStream(path4, options);
+      }
+      var fs$open = fs8.open;
+      fs8.open = open;
+      function open(path4, flags, mode, cb) {
+        if (typeof mode === "function")
+          cb = mode, mode = null;
+        return go$open(path4, flags, mode, cb);
+        function go$open(path5, flags2, mode2, cb2, startTime) {
+          return fs$open(path5, flags2, mode2, function(err, fd) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$open, [path5, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      return fs8;
+    }
+    function enqueue(elem) {
+      debug2("ENQUEUE", elem[0].name, elem[1]);
+      fs7[gracefulQueue].push(elem);
+      retry();
+    }
+    var retryTimer;
+    function resetQueue() {
+      var now = Date.now();
+      for (var i = 0; i < fs7[gracefulQueue].length; ++i) {
+        if (fs7[gracefulQueue][i].length > 2) {
+          fs7[gracefulQueue][i][3] = now;
+          fs7[gracefulQueue][i][4] = now;
+        }
+      }
+      retry();
+    }
+    function retry() {
+      clearTimeout(retryTimer);
+      retryTimer = void 0;
+      if (fs7[gracefulQueue].length === 0)
+        return;
+      var elem = fs7[gracefulQueue].shift();
+      var fn = elem[0];
+      var args = elem[1];
+      var err = elem[2];
+      var startTime = elem[3];
+      var lastTime = elem[4];
+      if (startTime === void 0) {
+        debug2("RETRY", fn.name, args);
+        fn.apply(null, args);
+      } else if (Date.now() - startTime >= 6e4) {
+        debug2("TIMEOUT", fn.name, args);
+        var cb = args.pop();
+        if (typeof cb === "function")
+          cb.call(null, err);
+      } else {
+        var sinceAttempt = Date.now() - lastTime;
+        var sinceStart = Math.max(lastTime - startTime, 1);
+        var desiredDelay = Math.min(sinceStart * 1.2, 100);
+        if (sinceAttempt >= desiredDelay) {
+          debug2("RETRY", fn.name, args);
+          fn.apply(null, args.concat([startTime]));
+        } else {
+          fs7[gracefulQueue].push(elem);
+        }
+      }
+      if (retryTimer === void 0) {
+        retryTimer = setTimeout(retry, 0);
+      }
+    }
+  }
+});
+
+// node_modules/retry/lib/retry_operation.js
+var require_retry_operation = __commonJS({
+  "node_modules/retry/lib/retry_operation.js"(exports2, module2) {
+    function RetryOperation(timeouts, options) {
+      if (typeof options === "boolean") {
+        options = { forever: options };
+      }
+      this._originalTimeouts = JSON.parse(JSON.stringify(timeouts));
+      this._timeouts = timeouts;
+      this._options = options || {};
+      this._maxRetryTime = options && options.maxRetryTime || Infinity;
+      this._fn = null;
+      this._errors = [];
+      this._attempts = 1;
+      this._operationTimeout = null;
+      this._operationTimeoutCb = null;
+      this._timeout = null;
+      this._operationStart = null;
+      if (this._options.forever) {
+        this._cachedTimeouts = this._timeouts.slice(0);
+      }
+    }
+    module2.exports = RetryOperation;
+    RetryOperation.prototype.reset = function() {
+      this._attempts = 1;
+      this._timeouts = this._originalTimeouts;
+    };
+    RetryOperation.prototype.stop = function() {
+      if (this._timeout) {
+        clearTimeout(this._timeout);
+      }
+      this._timeouts = [];
+      this._cachedTimeouts = null;
+    };
+    RetryOperation.prototype.retry = function(err) {
+      if (this._timeout) {
+        clearTimeout(this._timeout);
+      }
+      if (!err) {
+        return false;
+      }
+      var currentTime = (/* @__PURE__ */ new Date()).getTime();
+      if (err && currentTime - this._operationStart >= this._maxRetryTime) {
+        this._errors.unshift(new Error("RetryOperation timeout occurred"));
+        return false;
+      }
+      this._errors.push(err);
+      var timeout = this._timeouts.shift();
+      if (timeout === void 0) {
+        if (this._cachedTimeouts) {
+          this._errors.splice(this._errors.length - 1, this._errors.length);
+          this._timeouts = this._cachedTimeouts.slice(0);
+          timeout = this._timeouts.shift();
+        } else {
+          return false;
+        }
+      }
+      var self2 = this;
+      var timer = setTimeout(function() {
+        self2._attempts++;
+        if (self2._operationTimeoutCb) {
+          self2._timeout = setTimeout(function() {
+            self2._operationTimeoutCb(self2._attempts);
+          }, self2._operationTimeout);
+          if (self2._options.unref) {
+            self2._timeout.unref();
+          }
+        }
+        self2._fn(self2._attempts);
+      }, timeout);
+      if (this._options.unref) {
+        timer.unref();
+      }
+      return true;
+    };
+    RetryOperation.prototype.attempt = function(fn, timeoutOps) {
+      this._fn = fn;
+      if (timeoutOps) {
+        if (timeoutOps.timeout) {
+          this._operationTimeout = timeoutOps.timeout;
+        }
+        if (timeoutOps.cb) {
+          this._operationTimeoutCb = timeoutOps.cb;
+        }
+      }
+      var self2 = this;
+      if (this._operationTimeoutCb) {
+        this._timeout = setTimeout(function() {
+          self2._operationTimeoutCb();
+        }, self2._operationTimeout);
+      }
+      this._operationStart = (/* @__PURE__ */ new Date()).getTime();
+      this._fn(this._attempts);
+    };
+    RetryOperation.prototype.try = function(fn) {
+      console.log("Using RetryOperation.try() is deprecated");
+      this.attempt(fn);
+    };
+    RetryOperation.prototype.start = function(fn) {
+      console.log("Using RetryOperation.start() is deprecated");
+      this.attempt(fn);
+    };
+    RetryOperation.prototype.start = RetryOperation.prototype.try;
+    RetryOperation.prototype.errors = function() {
+      return this._errors;
+    };
+    RetryOperation.prototype.attempts = function() {
+      return this._attempts;
+    };
+    RetryOperation.prototype.mainError = function() {
+      if (this._errors.length === 0) {
+        return null;
+      }
+      var counts = {};
+      var mainError = null;
+      var mainErrorCount = 0;
+      for (var i = 0; i < this._errors.length; i++) {
+        var error = this._errors[i];
+        var message = error.message;
+        var count = (counts[message] || 0) + 1;
+        counts[message] = count;
+        if (count >= mainErrorCount) {
+          mainError = error;
+          mainErrorCount = count;
+        }
+      }
+      return mainError;
+    };
+  }
+});
+
+// node_modules/retry/lib/retry.js
+var require_retry = __commonJS({
+  "node_modules/retry/lib/retry.js"(exports2) {
+    var RetryOperation = require_retry_operation();
+    exports2.operation = function(options) {
+      var timeouts = exports2.timeouts(options);
+      return new RetryOperation(timeouts, {
+        forever: options && options.forever,
+        unref: options && options.unref,
+        maxRetryTime: options && options.maxRetryTime
+      });
+    };
+    exports2.timeouts = function(options) {
+      if (options instanceof Array) {
+        return [].concat(options);
+      }
+      var opts = {
+        retries: 10,
+        factor: 2,
+        minTimeout: 1 * 1e3,
+        maxTimeout: Infinity,
+        randomize: false
+      };
+      for (var key in options) {
+        opts[key] = options[key];
+      }
+      if (opts.minTimeout > opts.maxTimeout) {
+        throw new Error("minTimeout is greater than maxTimeout");
+      }
+      var timeouts = [];
+      for (var i = 0; i < opts.retries; i++) {
+        timeouts.push(this.createTimeout(i, opts));
+      }
+      if (options && options.forever && !timeouts.length) {
+        timeouts.push(this.createTimeout(i, opts));
+      }
+      timeouts.sort(function(a, b) {
+        return a - b;
+      });
+      return timeouts;
+    };
+    exports2.createTimeout = function(attempt, opts) {
+      var random = opts.randomize ? Math.random() + 1 : 1;
+      var timeout = Math.round(random * opts.minTimeout * Math.pow(opts.factor, attempt));
+      timeout = Math.min(timeout, opts.maxTimeout);
+      return timeout;
+    };
+    exports2.wrap = function(obj, options, methods) {
+      if (options instanceof Array) {
+        methods = options;
+        options = null;
+      }
+      if (!methods) {
+        methods = [];
+        for (var key in obj) {
+          if (typeof obj[key] === "function") {
+            methods.push(key);
+          }
+        }
+      }
+      for (var i = 0; i < methods.length; i++) {
+        var method = methods[i];
+        var original = obj[method];
+        obj[method] = function retryWrapper(original2) {
+          var op = exports2.operation(options);
+          var args = Array.prototype.slice.call(arguments, 1);
+          var callback = args.pop();
+          args.push(function(err) {
+            if (op.retry(err)) {
+              return;
+            }
+            if (err) {
+              arguments[0] = op.mainError();
+            }
+            callback.apply(this, arguments);
+          });
+          op.attempt(function() {
+            original2.apply(obj, args);
+          });
+        }.bind(obj, original);
+        obj[method].options = options;
+      }
+    };
+  }
+});
+
+// node_modules/retry/index.js
+var require_retry2 = __commonJS({
+  "node_modules/retry/index.js"(exports2, module2) {
+    module2.exports = require_retry();
+  }
+});
+
+// node_modules/signal-exit/signals.js
+var require_signals = __commonJS({
+  "node_modules/signal-exit/signals.js"(exports2, module2) {
+    module2.exports = [
+      "SIGABRT",
+      "SIGALRM",
+      "SIGHUP",
+      "SIGINT",
+      "SIGTERM"
+    ];
+    if (process.platform !== "win32") {
+      module2.exports.push(
+        "SIGVTALRM",
+        "SIGXCPU",
+        "SIGXFSZ",
+        "SIGUSR2",
+        "SIGTRAP",
+        "SIGSYS",
+        "SIGQUIT",
+        "SIGIOT"
+        // should detect profiler and enable/disable accordingly.
+        // see #21
+        // 'SIGPROF'
+      );
+    }
+    if (process.platform === "linux") {
+      module2.exports.push(
+        "SIGIO",
+        "SIGPOLL",
+        "SIGPWR",
+        "SIGSTKFLT",
+        "SIGUNUSED"
+      );
+    }
+  }
+});
+
+// node_modules/signal-exit/index.js
+var require_signal_exit = __commonJS({
+  "node_modules/signal-exit/index.js"(exports2, module2) {
+    var process2 = global.process;
+    var processOk = function(process3) {
+      return process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
+    };
+    if (!processOk(process2)) {
+      module2.exports = function() {
+        return function() {
+        };
+      };
+    } else {
+      assert = require("assert");
+      signals = require_signals();
+      isWin = /^win/i.test(process2.platform);
+      EE = require("events");
+      if (typeof EE !== "function") {
+        EE = EE.EventEmitter;
+      }
+      if (process2.__signal_exit_emitter__) {
+        emitter = process2.__signal_exit_emitter__;
+      } else {
+        emitter = process2.__signal_exit_emitter__ = new EE();
+        emitter.count = 0;
+        emitter.emitted = {};
+      }
+      if (!emitter.infinite) {
+        emitter.setMaxListeners(Infinity);
+        emitter.infinite = true;
+      }
+      module2.exports = function(cb, opts) {
+        if (!processOk(global.process)) {
+          return function() {
+          };
+        }
+        assert.equal(typeof cb, "function", "a callback must be provided for exit handler");
+        if (loaded === false) {
+          load();
+        }
+        var ev = "exit";
+        if (opts && opts.alwaysLast) {
+          ev = "afterexit";
+        }
+        var remove = function() {
+          emitter.removeListener(ev, cb);
+          if (emitter.listeners("exit").length === 0 && emitter.listeners("afterexit").length === 0) {
+            unload();
+          }
+        };
+        emitter.on(ev, cb);
+        return remove;
+      };
+      unload = function unload2() {
+        if (!loaded || !processOk(global.process)) {
+          return;
+        }
+        loaded = false;
+        signals.forEach(function(sig) {
+          try {
+            process2.removeListener(sig, sigListeners[sig]);
+          } catch (er) {
+          }
+        });
+        process2.emit = originalProcessEmit;
+        process2.reallyExit = originalProcessReallyExit;
+        emitter.count -= 1;
+      };
+      module2.exports.unload = unload;
+      emit = function emit2(event, code, signal) {
+        if (emitter.emitted[event]) {
+          return;
+        }
+        emitter.emitted[event] = true;
+        emitter.emit(event, code, signal);
+      };
+      sigListeners = {};
+      signals.forEach(function(sig) {
+        sigListeners[sig] = function listener() {
+          if (!processOk(global.process)) {
+            return;
+          }
+          var listeners = process2.listeners(sig);
+          if (listeners.length === emitter.count) {
+            unload();
+            emit("exit", null, sig);
+            emit("afterexit", null, sig);
+            if (isWin && sig === "SIGHUP") {
+              sig = "SIGINT";
+            }
+            process2.kill(process2.pid, sig);
+          }
+        };
+      });
+      module2.exports.signals = function() {
+        return signals;
+      };
+      loaded = false;
+      load = function load2() {
+        if (loaded || !processOk(global.process)) {
+          return;
+        }
+        loaded = true;
+        emitter.count += 1;
+        signals = signals.filter(function(sig) {
+          try {
+            process2.on(sig, sigListeners[sig]);
+            return true;
+          } catch (er) {
+            return false;
+          }
+        });
+        process2.emit = processEmit;
+        process2.reallyExit = processReallyExit;
+      };
+      module2.exports.load = load;
+      originalProcessReallyExit = process2.reallyExit;
+      processReallyExit = function processReallyExit2(code) {
+        if (!processOk(global.process)) {
+          return;
+        }
+        process2.exitCode = code || /* istanbul ignore next */
+        0;
+        emit("exit", process2.exitCode, null);
+        emit("afterexit", process2.exitCode, null);
+        originalProcessReallyExit.call(process2, process2.exitCode);
+      };
+      originalProcessEmit = process2.emit;
+      processEmit = function processEmit2(ev, arg) {
+        if (ev === "exit" && processOk(global.process)) {
+          if (arg !== void 0) {
+            process2.exitCode = arg;
+          }
+          var ret = originalProcessEmit.apply(this, arguments);
+          emit("exit", process2.exitCode, null);
+          emit("afterexit", process2.exitCode, null);
+          return ret;
+        } else {
+          return originalProcessEmit.apply(this, arguments);
+        }
+      };
+    }
+    var assert;
+    var signals;
+    var isWin;
+    var EE;
+    var emitter;
+    var unload;
+    var emit;
+    var sigListeners;
+    var loaded;
+    var load;
+    var originalProcessReallyExit;
+    var processReallyExit;
+    var originalProcessEmit;
+    var processEmit;
+  }
+});
+
+// node_modules/proper-lockfile/lib/mtime-precision.js
+var require_mtime_precision = __commonJS({
+  "node_modules/proper-lockfile/lib/mtime-precision.js"(exports2, module2) {
+    "use strict";
+    var cacheSymbol = Symbol();
+    function probe(file, fs7, callback) {
+      const cachedPrecision = fs7[cacheSymbol];
+      if (cachedPrecision) {
+        return fs7.stat(file, (err, stat) => {
+          if (err) {
+            return callback(err);
+          }
+          callback(null, stat.mtime, cachedPrecision);
+        });
+      }
+      const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
+      fs7.utimes(file, mtime, mtime, (err) => {
+        if (err) {
+          return callback(err);
+        }
+        fs7.stat(file, (err2, stat) => {
+          if (err2) {
+            return callback(err2);
+          }
+          const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
+          Object.defineProperty(fs7, cacheSymbol, { value: precision });
+          callback(null, stat.mtime, precision);
+        });
+      });
+    }
+    function getMtime(precision) {
+      let now = Date.now();
+      if (precision === "s") {
+        now = Math.ceil(now / 1e3) * 1e3;
+      }
+      return new Date(now);
+    }
+    module2.exports.probe = probe;
+    module2.exports.getMtime = getMtime;
+  }
+});
+
+// node_modules/proper-lockfile/lib/lockfile.js
+var require_lockfile = __commonJS({
+  "node_modules/proper-lockfile/lib/lockfile.js"(exports2, module2) {
+    "use strict";
+    var path4 = require("path");
+    var fs7 = require_graceful_fs();
+    var retry = require_retry2();
+    var onExit = require_signal_exit();
+    var mtimePrecision = require_mtime_precision();
+    var locks = {};
+    function getLockFile(file, options) {
+      return options.lockfilePath || `${file}.lock`;
+    }
+    function resolveCanonicalPath(file, options, callback) {
+      if (!options.realpath) {
+        return callback(null, path4.resolve(file));
+      }
+      options.fs.realpath(file, callback);
+    }
+    function acquireLock(file, options, callback) {
+      const lockfilePath = getLockFile(file, options);
+      options.fs.mkdir(lockfilePath, (err) => {
+        if (!err) {
+          return mtimePrecision.probe(lockfilePath, options.fs, (err2, mtime, mtimePrecision2) => {
+            if (err2) {
+              options.fs.rmdir(lockfilePath, () => {
+              });
+              return callback(err2);
+            }
+            callback(null, mtime, mtimePrecision2);
+          });
+        }
+        if (err.code !== "EEXIST") {
+          return callback(err);
+        }
+        if (options.stale <= 0) {
+          return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file }));
+        }
+        options.fs.stat(lockfilePath, (err2, stat) => {
+          if (err2) {
+            if (err2.code === "ENOENT") {
+              return acquireLock(file, { ...options, stale: 0 }, callback);
+            }
+            return callback(err2);
+          }
+          if (!isLockStale(stat, options)) {
+            return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file }));
+          }
+          removeLock(file, options, (err3) => {
+            if (err3) {
+              return callback(err3);
+            }
+            acquireLock(file, { ...options, stale: 0 }, callback);
+          });
+        });
+      });
+    }
+    function isLockStale(stat, options) {
+      return stat.mtime.getTime() < Date.now() - options.stale;
+    }
+    function removeLock(file, options, callback) {
+      options.fs.rmdir(getLockFile(file, options), (err) => {
+        if (err && err.code !== "ENOENT") {
+          return callback(err);
+        }
+        callback();
+      });
+    }
+    function updateLock(file, options) {
+      const lock2 = locks[file];
+      if (lock2.updateTimeout) {
+        return;
+      }
+      lock2.updateDelay = lock2.updateDelay || options.update;
+      lock2.updateTimeout = setTimeout(() => {
+        lock2.updateTimeout = null;
+        options.fs.stat(lock2.lockfilePath, (err, stat) => {
+          const isOverThreshold = lock2.lastUpdate + options.stale < Date.now();
+          if (err) {
+            if (err.code === "ENOENT" || isOverThreshold) {
+              return setLockAsCompromised(file, lock2, Object.assign(err, { code: "ECOMPROMISED" }));
+            }
+            lock2.updateDelay = 1e3;
+            return updateLock(file, options);
+          }
+          const isMtimeOurs = lock2.mtime.getTime() === stat.mtime.getTime();
+          if (!isMtimeOurs) {
+            return setLockAsCompromised(
+              file,
+              lock2,
+              Object.assign(
+                new Error("Unable to update lock within the stale threshold"),
+                { code: "ECOMPROMISED" }
+              )
+            );
+          }
+          const mtime = mtimePrecision.getMtime(lock2.mtimePrecision);
+          options.fs.utimes(lock2.lockfilePath, mtime, mtime, (err2) => {
+            const isOverThreshold2 = lock2.lastUpdate + options.stale < Date.now();
+            if (lock2.released) {
+              return;
+            }
+            if (err2) {
+              if (err2.code === "ENOENT" || isOverThreshold2) {
+                return setLockAsCompromised(file, lock2, Object.assign(err2, { code: "ECOMPROMISED" }));
+              }
+              lock2.updateDelay = 1e3;
+              return updateLock(file, options);
+            }
+            lock2.mtime = mtime;
+            lock2.lastUpdate = Date.now();
+            lock2.updateDelay = null;
+            updateLock(file, options);
+          });
+        });
+      }, lock2.updateDelay);
+      if (lock2.updateTimeout.unref) {
+        lock2.updateTimeout.unref();
+      }
+    }
+    function setLockAsCompromised(file, lock2, err) {
+      lock2.released = true;
+      if (lock2.updateTimeout) {
+        clearTimeout(lock2.updateTimeout);
+      }
+      if (locks[file] === lock2) {
+        delete locks[file];
+      }
+      lock2.options.onCompromised(err);
+    }
+    function lock(file, options, callback) {
+      options = {
+        stale: 1e4,
+        update: null,
+        realpath: true,
+        retries: 0,
+        fs: fs7,
+        onCompromised: (err) => {
+          throw err;
+        },
+        ...options
+      };
+      options.retries = options.retries || 0;
+      options.retries = typeof options.retries === "number" ? { retries: options.retries } : options.retries;
+      options.stale = Math.max(options.stale || 0, 2e3);
+      options.update = options.update == null ? options.stale / 2 : options.update || 0;
+      options.update = Math.max(Math.min(options.update, options.stale / 2), 1e3);
+      resolveCanonicalPath(file, options, (err, file2) => {
+        if (err) {
+          return callback(err);
+        }
+        const operation = retry.operation(options.retries);
+        operation.attempt(() => {
+          acquireLock(file2, options, (err2, mtime, mtimePrecision2) => {
+            if (operation.retry(err2)) {
+              return;
+            }
+            if (err2) {
+              return callback(operation.mainError());
+            }
+            const lock2 = locks[file2] = {
+              lockfilePath: getLockFile(file2, options),
+              mtime,
+              mtimePrecision: mtimePrecision2,
+              options,
+              lastUpdate: Date.now()
+            };
+            updateLock(file2, options);
+            callback(null, (releasedCallback) => {
+              if (lock2.released) {
+                return releasedCallback && releasedCallback(Object.assign(new Error("Lock is already released"), { code: "ERELEASED" }));
+              }
+              unlock(file2, { ...options, realpath: false }, releasedCallback);
+            });
+          });
+        });
+      });
+    }
+    function unlock(file, options, callback) {
+      options = {
+        fs: fs7,
+        realpath: true,
+        ...options
+      };
+      resolveCanonicalPath(file, options, (err, file2) => {
+        if (err) {
+          return callback(err);
+        }
+        const lock2 = locks[file2];
+        if (!lock2) {
+          return callback(Object.assign(new Error("Lock is not acquired/owned by you"), { code: "ENOTACQUIRED" }));
+        }
+        lock2.updateTimeout && clearTimeout(lock2.updateTimeout);
+        lock2.released = true;
+        delete locks[file2];
+        removeLock(file2, options, callback);
+      });
+    }
+    function check(file, options, callback) {
+      options = {
+        stale: 1e4,
+        realpath: true,
+        fs: fs7,
+        ...options
+      };
+      options.stale = Math.max(options.stale || 0, 2e3);
+      resolveCanonicalPath(file, options, (err, file2) => {
+        if (err) {
+          return callback(err);
+        }
+        options.fs.stat(getLockFile(file2, options), (err2, stat) => {
+          if (err2) {
+            return err2.code === "ENOENT" ? callback(null, false) : callback(err2);
+          }
+          return callback(null, !isLockStale(stat, options));
+        });
+      });
+    }
+    function getLocks() {
+      return locks;
+    }
+    onExit(() => {
+      for (const file in locks) {
+        const options = locks[file].options;
+        try {
+          options.fs.rmdirSync(getLockFile(file, options));
+        } catch (e) {
+        }
+      }
+    });
+    module2.exports.lock = lock;
+    module2.exports.unlock = unlock;
+    module2.exports.check = check;
+    module2.exports.getLocks = getLocks;
+  }
+});
+
+// node_modules/proper-lockfile/lib/adapter.js
+var require_adapter = __commonJS({
+  "node_modules/proper-lockfile/lib/adapter.js"(exports2, module2) {
+    "use strict";
+    var fs7 = require_graceful_fs();
+    function createSyncFs(fs8) {
+      const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
+      const newFs = { ...fs8 };
+      methods.forEach((method) => {
+        newFs[method] = (...args) => {
+          const callback = args.pop();
+          let ret;
+          try {
+            ret = fs8[`${method}Sync`](...args);
+          } catch (err) {
+            return callback(err);
+          }
+          callback(null, ret);
+        };
+      });
+      return newFs;
+    }
+    function toPromise(method) {
+      return (...args) => new Promise((resolve2, reject) => {
+        args.push((err, result) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve2(result);
+          }
+        });
+        method(...args);
+      });
+    }
+    function toSync(method) {
+      return (...args) => {
+        let err;
+        let result;
+        args.push((_err, _result) => {
+          err = _err;
+          result = _result;
+        });
+        method(...args);
+        if (err) {
+          throw err;
+        }
+        return result;
+      };
+    }
+    function toSyncOptions(options) {
+      options = { ...options };
+      options.fs = createSyncFs(options.fs || fs7);
+      if (typeof options.retries === "number" && options.retries > 0 || options.retries && typeof options.retries.retries === "number" && options.retries.retries > 0) {
+        throw Object.assign(new Error("Cannot use retries with the sync api"), { code: "ESYNC" });
+      }
+      return options;
+    }
+    module2.exports = {
+      toPromise,
+      toSync,
+      toSyncOptions
+    };
+  }
+});
+
+// node_modules/proper-lockfile/index.js
+var require_proper_lockfile = __commonJS({
+  "node_modules/proper-lockfile/index.js"(exports2, module2) {
+    "use strict";
+    var lockfile2 = require_lockfile();
+    var { toPromise, toSync, toSyncOptions } = require_adapter();
+    async function lock(file, options) {
+      const release = await toPromise(lockfile2.lock)(file, options);
+      return toPromise(release);
+    }
+    function lockSync(file, options) {
+      const release = toSync(lockfile2.lock)(file, toSyncOptions(options));
+      return toSync(release);
+    }
+    function unlock(file, options) {
+      return toPromise(lockfile2.unlock)(file, options);
+    }
+    function unlockSync(file, options) {
+      return toSync(lockfile2.unlock)(file, toSyncOptions(options));
+    }
+    function check(file, options) {
+      return toPromise(lockfile2.check)(file, options);
+    }
+    function checkSync(file, options) {
+      return toSync(lockfile2.check)(file, toSyncOptions(options));
+    }
+    module2.exports = lock;
+    module2.exports.lock = lock;
+    module2.exports.unlock = unlock;
+    module2.exports.lockSync = lockSync;
+    module2.exports.unlockSync = unlockSync;
+    module2.exports.check = check;
+    module2.exports.checkSync = checkSync;
+  }
+});
+
 // src/hook.ts
-var fs5 = __toESM(require("node:fs"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var os2 = __toESM(require("node:os"), 1);
 var path3 = __toESM(require("node:path"), 1);
 
 // src/config.ts
+var fs = __toESM(require("node:fs"), 1);
 var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
 function opt(name) {
   return process.env[`CLAUDE_PLUGIN_OPTION_${name}`] || process.env[name] || "";
+}
+function lmnrConfigDir() {
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg) {
+    return path.join(xdg, "lmnr");
+  }
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, "lmnr");
+  }
+  return path.join(os.homedir(), ".config", "lmnr");
+}
+function readLoggedInUserId() {
+  try {
+    const creds = JSON.parse(fs.readFileSync(path.join(lmnrConfigDir(), "credentials.json"), "utf-8"));
+    if (typeof creds !== "object" || creds === null) {
+      return null;
+    }
+    if (typeof creds.userEmail === "string" && creds.userEmail) {
+      return creds.userEmail;
+    }
+    return typeof creds.userId === "string" && creds.userId ? creds.userId : null;
+  } catch {
+    return null;
+  }
 }
 function stateDir() {
   return opt("CC_LMNR_STATE_DIR") || path.join(os.homedir(), ".claude", "state");
@@ -25033,7 +25058,7 @@ var EXPORT_TIMEOUT_S = 5;
 function getLaminarConfig() {
   const apiKey = opt("LMNR_PROJECT_API_KEY") || opt("CC_LMNR_PROJECT_API_KEY");
   const baseUrl = (opt("LMNR_BASE_URL") || opt("CC_LMNR_BASE_URL") || "https://api.lmnr.ai").replace(/\/+$/, "");
-  const userId = opt("LMNR_USER_ID") || opt("CC_LMNR_USER_ID") || null;
+  const userId = opt("LMNR_USER_ID") || readLoggedInUserId() || null;
   if (!apiKey) {
     return null;
   }
@@ -25041,7 +25066,7 @@ function getLaminarConfig() {
 }
 
 // src/logger.ts
-var fs = __toESM(require("node:fs"), 1);
+var fs2 = __toESM(require("node:fs"), 1);
 var MAX_BYTES = 5e6;
 var BACKUP_COUNT = 3;
 function formatTimestamp(d) {
@@ -25050,15 +25075,15 @@ function formatTimestamp(d) {
 }
 function rotateIfNeeded(file) {
   try {
-    const size = fs.statSync(file).size;
+    const size = fs2.statSync(file).size;
     if (size < MAX_BYTES) {
       return;
     }
     for (let i = BACKUP_COUNT; i >= 1; i--) {
       const src = i === 1 ? file : `${file}.${i - 1}`;
       const dst = `${file}.${i}`;
-      if (fs.existsSync(src)) {
-        fs.renameSync(src, dst);
+      if (fs2.existsSync(src)) {
+        fs2.renameSync(src, dst);
       }
     }
   } catch {
@@ -25067,9 +25092,9 @@ function rotateIfNeeded(file) {
 function write(level, msg) {
   try {
     const file = logFile();
-    fs.mkdirSync(stateDir(), { recursive: true });
+    fs2.mkdirSync(stateDir(), { recursive: true });
     rotateIfNeeded(file);
-    fs.appendFileSync(file, `${formatTimestamp(/* @__PURE__ */ new Date())} [${level}] ${msg}
+    fs2.appendFileSync(file, `${formatTimestamp(/* @__PURE__ */ new Date())} [${level}] ${msg}
 `, "utf-8");
   } catch {
   }
@@ -25086,7 +25111,7 @@ function info(msg) {
 
 // src/transcript.ts
 var crypto = __toESM(require("node:crypto"), 1);
-var fs2 = __toESM(require("node:fs"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
 function getContentFromRow(row) {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -25233,28 +25258,28 @@ function readNewJsonl(transcriptPath, sessionState, flushBuffer = false) {
   return [msgs, state];
 }
 function readNewJsonlIncremental(transcriptPath, sessionState) {
-  if (!fs2.existsSync(transcriptPath)) {
+  if (!fs3.existsSync(transcriptPath)) {
     return [[], sessionState];
   }
   let chunk;
   let newOffset;
   try {
-    const fileSize = fs2.statSync(transcriptPath).size;
+    const fileSize = fs3.statSync(transcriptPath).size;
     if (fileSize < sessionState.offset) {
       debug(`transcript shrank (${fileSize} < ${sessionState.offset}); restarting`);
       sessionState.offset = 0;
       sessionState.buffer = "";
     }
-    const fd = fs2.openSync(transcriptPath, "r");
+    const fd = fs3.openSync(transcriptPath, "r");
     try {
       const len = Math.max(0, fileSize - sessionState.offset);
       chunk = Buffer.alloc(len);
       if (len > 0) {
-        fs2.readSync(fd, chunk, 0, len, sessionState.offset);
+        fs3.readSync(fd, chunk, 0, len, sessionState.offset);
       }
       newOffset = fileSize;
     } finally {
-      fs2.closeSync(fd);
+      fs3.closeSync(fd);
     }
   } catch (e) {
     debug(`readNewJsonl failed: ${e}`);
@@ -25350,16 +25375,7 @@ function getLatestTimestamp(...timestamps) {
   return latest;
 }
 
-// src/turns.ts
-var TurnAssemblyState = class {
-  currentTurnUserRow = null;
-  assistantMessageIds = [];
-  assistantRowsByMessageId = {};
-  toolResultsById = {};
-  toolUseTimestampsById = {};
-  injectedByToolId = {};
-  currentRows = [];
-};
+// src/deferral.ts
 function getToolResultText(toolResultEntry) {
   if (!toolResultEntry) {
     return "";
@@ -25387,6 +25403,300 @@ function isAsyncAgentLaunchResult(toolResultEntry) {
   const toolResultText = getToolResultText(toolResultEntry);
   return toolResultText.includes("Async agent launched successfully") || toolResultText.includes("agentId:") && toolResultText.includes("output_file:") && toolResultText.includes("You will be notified automatically");
 }
+function getTaskIdToToolUseId(subagentTranscriptsByToolUseId) {
+  const taskIdToToolUseId = {};
+  if (!subagentTranscriptsByToolUseId) {
+    return taskIdToToolUseId;
+  }
+  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
+    const agentId = subagent.agentId;
+    if (typeof agentId === "string" && agentId) {
+      taskIdToToolUseId[agentId] = toolUseId;
+    }
+  }
+  return taskIdToToolUseId;
+}
+function findPendingAgentTurn(sessionState, toolUseId) {
+  for (const pendingTurn of sessionState.pendingAgentTurns) {
+    if (pendingTurn.pendingToolUseIds.includes(toolUseId) || pendingTurn.resolvedToolUseIds.includes(toolUseId)) {
+      return pendingTurn;
+    }
+  }
+  return null;
+}
+function routeToPendingTurn(pendingTurn, row, toolUseId) {
+  pendingTurn.rows.push(row);
+  const idx = pendingTurn.pendingToolUseIds.indexOf(toolUseId);
+  if (idx >= 0) {
+    pendingTurn.pendingToolUseIds.splice(idx, 1);
+    pendingTurn.resolvedToolUseIds.push(toolUseId);
+  }
+}
+function resolveDeferredAgentTurns(rows, sessionState, taskIdToToolUseId) {
+  const remainingRows = [];
+  const stashedNotifications = [];
+  for (const row of sessionState.pendingTaskNotifications) {
+    const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
+    if (toolUseId === null) {
+      stashedNotifications.push(row);
+      continue;
+    }
+    const pendingTurn = findPendingAgentTurn(sessionState, toolUseId);
+    if (pendingTurn === null) {
+      debug(`Dropping stashed task notification for ${toolUseId}: no deferred turn waits for it`);
+      continue;
+    }
+    routeToPendingTurn(pendingTurn, row, toolUseId);
+  }
+  for (const row of rows) {
+    if (!isTaskNotificationRow(row)) {
+      remainingRows.push(row);
+      continue;
+    }
+    const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
+    if (toolUseId === null) {
+      stashedNotifications.push(row);
+      continue;
+    }
+    const pendingTurn = findPendingAgentTurn(sessionState, toolUseId);
+    if (pendingTurn === null) {
+      remainingRows.push(row);
+      continue;
+    }
+    routeToPendingTurn(pendingTurn, row, toolUseId);
+  }
+  sessionState.pendingTaskNotifications = stashedNotifications.slice(-MAX_PENDING_TASK_NOTIFICATIONS);
+  const resolvedTurnRowLists = [];
+  const stillPending = [];
+  for (const pendingTurn of sessionState.pendingAgentTurns) {
+    if (pendingTurn.pendingToolUseIds.length > 0) {
+      stillPending.push(pendingTurn);
+    } else {
+      resolvedTurnRowLists.push(pendingTurn.rows);
+    }
+  }
+  sessionState.pendingAgentTurns = stillPending;
+  return [resolvedTurnRowLists, remainingRows];
+}
+function popAllDeferredAgentTurnRowLists(sessionState) {
+  const rowLists = sessionState.pendingAgentTurns.filter((t) => t.rows.length > 0).map((t) => t.rows);
+  sessionState.pendingAgentTurns = [];
+  return rowLists;
+}
+function getPendingAgentToolUseIds(turn) {
+  const toolUseIds = [];
+  for (const assistantMessage of turn.assistantMsgs) {
+    for (const toolUseBlock of getToolUseBlocks(getContentFromRow(assistantMessage))) {
+      if (toolUseBlock.name !== "Agent" && toolUseBlock.name !== "Task") {
+        continue;
+      }
+      const toolUseId = String(toolUseBlock.id || "");
+      if (!toolUseId) {
+        continue;
+      }
+      const toolResultEntry = turn.toolResultsById[toolUseId];
+      if (toolResultEntry?.finalContent != null) {
+        continue;
+      }
+      if (isAsyncAgentLaunchResult(toolResultEntry)) {
+        toolUseIds.push(toolUseId);
+      }
+    }
+  }
+  return toolUseIds;
+}
+function getTurnsToEmit(turns, sessionState, flushDeferredAgentTurns = false) {
+  const turnsToEmit = [];
+  for (const turn of turns) {
+    const pendingAgentToolUseIds = getPendingAgentToolUseIds(turn);
+    if (pendingAgentToolUseIds.length === 0) {
+      turnsToEmit.push(turn);
+      continue;
+    }
+    if (flushDeferredAgentTurns) {
+      debug(`Emitting async agent turn without task notification: ${pendingAgentToolUseIds}`);
+      turnsToEmit.push(turn);
+      continue;
+    }
+    sessionState.pendingAgentTurns.push({
+      pendingToolUseIds: pendingAgentToolUseIds,
+      resolvedToolUseIds: [],
+      rows: turn.rows
+    });
+    debug(`Deferred agent turn until task notification: ${pendingAgentToolUseIds}`);
+  }
+  return turnsToEmit;
+}
+
+// src/tracer.ts
+init_esm();
+var import_core3 = __toESM(require_src(), 1);
+var import_exporter_trace_otlp_http = __toESM(require_src5(), 1);
+var import_resources = __toESM(require_src2(), 1);
+var import_sdk_trace_base = __toESM(require_src6(), 1);
+var SPAN_TYPE_ATTR = "lmnr.span.type";
+var SPAN_INPUT_ATTR = "lmnr.span.input";
+var SPAN_OUTPUT_ATTR = "lmnr.span.output";
+var ASSOC_PREFIX = "lmnr.association.properties";
+function toOtelAttributes(attrs) {
+  const out = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === null || value === void 0) {
+      continue;
+    }
+    if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
+      out[key] = value;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const arr = value.filter((x) => x !== null && x !== void 0);
+      out[key] = arr;
+      continue;
+    }
+  }
+  return out;
+}
+var CollectingSpanProcessor = class {
+  spans = [];
+  onStart() {
+  }
+  onEnd(span) {
+    this.spans.push(span);
+  }
+  forceFlush() {
+    return Promise.resolve();
+  }
+  shutdown() {
+    return Promise.resolve();
+  }
+};
+var TraceEmitter = class {
+  config;
+  processor;
+  tracer;
+  constructor(config) {
+    this.config = config;
+    this.processor = new CollectingSpanProcessor();
+    const provider = new import_sdk_trace_base.BasicTracerProvider({
+      resource: new import_resources.Resource({
+        "service.name": "claude-code",
+        "telemetry.sdk.language": "nodejs",
+        "telemetry.sdk.name": "lmnr-claude-code-plugin"
+      }),
+      spanProcessors: [this.processor]
+    });
+    this.tracer = provider.getTracer("lmnr.claude_code");
+  }
+  get spans() {
+    return this.processor.spans;
+  }
+  startSpan(name, startTime, attributes, parent) {
+    const parentCtx = parent ? parent.context : ROOT_CONTEXT;
+    const span = this.tracer.startSpan(
+      name,
+      { kind: SpanKind.INTERNAL, startTime, attributes: toOtelAttributes(attributes) },
+      parentCtx
+    );
+    span.setStatus({ code: SpanStatusCode.OK });
+    return new SpanHandle(span, startTime);
+  }
+};
+var SpanHandle = class {
+  context;
+  span;
+  startTime;
+  ended = false;
+  constructor(span, startTime) {
+    this.span = span;
+    this.startTime = startTime;
+    this.context = trace.setSpan(ROOT_CONTEXT, span);
+  }
+  get traceId() {
+    return this.span.spanContext().traceId;
+  }
+  get spanId() {
+    return this.span.spanContext().spanId;
+  }
+  setAttributes(attributes) {
+    this.span.setAttributes(toOtelAttributes(attributes));
+  }
+  end(endTime) {
+    if (this.ended) {
+      return;
+    }
+    this.ended = true;
+    let end = endTime ?? this.startTime;
+    if (end.getTime() < this.startTime.getTime()) {
+      end = this.startTime;
+    }
+    this.span.end(end);
+  }
+};
+function startSpan(emitter, args) {
+  const attrs = { [SPAN_TYPE_ATTR]: args.spanType ?? "DEFAULT" };
+  if (args.inputValue !== void 0 && args.inputValue !== null) {
+    attrs[SPAN_INPUT_ATTR] = jsonDumps(args.inputValue);
+  }
+  if (args.attributes) {
+    Object.assign(attrs, args.attributes);
+  }
+  return emitter.startSpan(args.name, args.startTime ?? /* @__PURE__ */ new Date(), attrs, args.parent);
+}
+async function exportSpans(emitter) {
+  const spans = emitter.spans;
+  if (spans.length === 0) {
+    return true;
+  }
+  const exporter = new import_exporter_trace_otlp_http.OTLPTraceExporter({
+    url: `${emitter.config.baseUrl}/v1/traces`,
+    headers: { Authorization: `Bearer ${emitter.config.apiKey}` },
+    timeoutMillis: Math.round(EXPORT_TIMEOUT_S * 1e3)
+  });
+  try {
+    const result = await new Promise((resolve2) => {
+      exporter.export(spans, resolve2);
+    });
+    if (result.code === import_core3.ExportResultCode.SUCCESS) {
+      debug(`OTLP export: ${spans.length} span(s)`);
+      return true;
+    }
+    info(`OTLP export failed: ${result.error ?? "unknown error"}`);
+    return false;
+  } catch (e) {
+    info(`OTLP export failed: ${e}`);
+    return false;
+  } finally {
+    try {
+      await exporter.shutdown();
+    } catch {
+    }
+  }
+}
+async function exportWithTimeout(emitter) {
+  const timeoutMs = Math.round((EXPORT_TIMEOUT_S + 1) * 1e3);
+  let timer;
+  const timeout = new Promise((resolve2) => {
+    timer = setTimeout(() => resolve2(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([exportSpans(emitter), timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+// src/turns.ts
+var TurnAssemblyState = class {
+  currentTurnUserRow = null;
+  assistantMessageIds = [];
+  assistantRowsByMessageId = {};
+  toolResultsById = {};
+  toolUseTimestampsById = {};
+  injectedByToolId = {};
+  currentRows = [];
+};
 function mergeAssistantRows(rows) {
   const last = rows[rows.length - 1] ?? {};
   const base = { ...last };
@@ -25555,406 +25865,6 @@ function buildTurns(rows, taskIdToToolUseId) {
   return turns;
 }
 
-// src/deferral.ts
-function findPendingAgentTurn(sessionState, toolUseId) {
-  for (const pendingTurn of sessionState.pendingAgentTurns) {
-    if (pendingTurn.pendingToolUseIds.includes(toolUseId) || pendingTurn.resolvedToolUseIds.includes(toolUseId)) {
-      return pendingTurn;
-    }
-  }
-  return null;
-}
-function routeToPendingTurn(pendingTurn, row, toolUseId) {
-  pendingTurn.rows.push(row);
-  const idx = pendingTurn.pendingToolUseIds.indexOf(toolUseId);
-  if (idx >= 0) {
-    pendingTurn.pendingToolUseIds.splice(idx, 1);
-    pendingTurn.resolvedToolUseIds.push(toolUseId);
-  }
-}
-function resolveDeferredAgentTurns(rows, sessionState, taskIdToToolUseId) {
-  const remainingRows = [];
-  const stashedNotifications = [];
-  for (const row of sessionState.pendingTaskNotifications) {
-    const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
-    if (toolUseId === null) {
-      stashedNotifications.push(row);
-      continue;
-    }
-    const pendingTurn = findPendingAgentTurn(sessionState, toolUseId);
-    if (pendingTurn === null) {
-      debug(`Dropping stashed task notification for ${toolUseId}: no deferred turn waits for it`);
-      continue;
-    }
-    routeToPendingTurn(pendingTurn, row, toolUseId);
-  }
-  for (const row of rows) {
-    if (!isTaskNotificationRow(row)) {
-      remainingRows.push(row);
-      continue;
-    }
-    const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
-    if (toolUseId === null) {
-      stashedNotifications.push(row);
-      continue;
-    }
-    const pendingTurn = findPendingAgentTurn(sessionState, toolUseId);
-    if (pendingTurn === null) {
-      remainingRows.push(row);
-      continue;
-    }
-    routeToPendingTurn(pendingTurn, row, toolUseId);
-  }
-  sessionState.pendingTaskNotifications = stashedNotifications.slice(-MAX_PENDING_TASK_NOTIFICATIONS);
-  const resolvedTurnRowLists = [];
-  const stillPending = [];
-  for (const pendingTurn of sessionState.pendingAgentTurns) {
-    if (pendingTurn.pendingToolUseIds.length > 0) {
-      stillPending.push(pendingTurn);
-    } else {
-      resolvedTurnRowLists.push(pendingTurn.rows);
-    }
-  }
-  sessionState.pendingAgentTurns = stillPending;
-  return [resolvedTurnRowLists, remainingRows];
-}
-function popAllDeferredAgentTurnRowLists(sessionState) {
-  const rowLists = sessionState.pendingAgentTurns.filter((t) => t.rows.length > 0).map((t) => t.rows);
-  sessionState.pendingAgentTurns = [];
-  return rowLists;
-}
-function getPendingAgentToolUseIds(turn) {
-  const toolUseIds = [];
-  for (const assistantMessage of turn.assistantMsgs) {
-    for (const toolUseBlock of getToolUseBlocks(getContentFromRow(assistantMessage))) {
-      if (toolUseBlock.name !== "Agent" && toolUseBlock.name !== "Task") {
-        continue;
-      }
-      const toolUseId = String(toolUseBlock.id || "");
-      if (!toolUseId) {
-        continue;
-      }
-      const toolResultEntry = turn.toolResultsById[toolUseId];
-      if (toolResultEntry?.finalContent != null) {
-        continue;
-      }
-      if (isAsyncAgentLaunchResult(toolResultEntry)) {
-        toolUseIds.push(toolUseId);
-      }
-    }
-  }
-  return toolUseIds;
-}
-function getTurnsToEmit(turns, sessionState, flushDeferredAgentTurns = false) {
-  const turnsToEmit = [];
-  for (const turn of turns) {
-    const pendingAgentToolUseIds = getPendingAgentToolUseIds(turn);
-    if (pendingAgentToolUseIds.length === 0) {
-      turnsToEmit.push(turn);
-      continue;
-    }
-    if (flushDeferredAgentTurns) {
-      debug(`Emitting async agent turn without task notification: ${pendingAgentToolUseIds}`);
-      turnsToEmit.push(turn);
-      continue;
-    }
-    sessionState.pendingAgentTurns.push({
-      pendingToolUseIds: pendingAgentToolUseIds,
-      resolvedToolUseIds: [],
-      rows: turn.rows
-    });
-    debug(`Deferred agent turn until task notification: ${pendingAgentToolUseIds}`);
-  }
-  return turnsToEmit;
-}
-
-// src/state.ts
-var crypto2 = __toESM(require("node:crypto"), 1);
-var fs3 = __toESM(require("node:fs"), 1);
-var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
-var SessionState = class {
-  offset;
-  // Last byte read from the transcript file.
-  buffer;
-  // Partial JSONL line kept between hook runs.
-  turnCount;
-  // Turns already emitted for this session.
-  pendingAgentTurns;
-  // Task-notification rows whose tool_use_id could not be resolved yet
-  // (task-id-only and the subagent meta.json not on disk); retried each run.
-  pendingTaskNotifications;
-  // Raw rows of an incomplete trailing turn (a user prompt whose assistant
-  // response has not been written yet) held back so the next hook run re-reads
-  // it together with the response. Guards against the transcript being flushed
-  // between the Stop hook firing and the assistant row landing.
-  pendingTurnRows;
-  constructor(init = {}) {
-    this.offset = init.offset ?? 0;
-    this.buffer = init.buffer ?? "";
-    this.turnCount = init.turnCount ?? 0;
-    this.pendingAgentTurns = init.pendingAgentTurns ?? [];
-    this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
-    this.pendingTurnRows = init.pendingTurnRows ?? [];
-  }
-};
-function loadHookState() {
-  try {
-    const file = stateFile();
-    if (!fs3.existsSync(file)) {
-      return {};
-    }
-    return JSON.parse(fs3.readFileSync(file, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-function getSessionStateKey(sessionId, transcriptPath) {
-  const raw = `${sessionId}::${transcriptPath}`;
-  return crypto2.createHash("sha256").update(raw, "utf-8").digest("hex");
-}
-function getSessionState(globalState, key) {
-  const s = globalState[key] ?? {};
-  return new SessionState({
-    offset: Number(s.offset ?? 0),
-    buffer: String(s.buffer ?? ""),
-    turnCount: Number(s.turnCount ?? 0),
-    pendingAgentTurns: Array.isArray(s.pendingAgentTurns) ? s.pendingAgentTurns : [],
-    pendingTaskNotifications: Array.isArray(s.pendingTaskNotifications) ? s.pendingTaskNotifications : [],
-    pendingTurnRows: Array.isArray(s.pendingTurnRows) ? s.pendingTurnRows : []
-  });
-}
-function updateSessionState(globalState, key, sessionState) {
-  globalState[key] = {
-    offset: sessionState.offset,
-    buffer: sessionState.buffer,
-    turnCount: sessionState.turnCount,
-    pendingAgentTurns: sessionState.pendingAgentTurns,
-    pendingTaskNotifications: sessionState.pendingTaskNotifications,
-    pendingTurnRows: sessionState.pendingTurnRows,
-    updated: (/* @__PURE__ */ new Date()).toISOString()
-  };
-}
-function saveHookState(state) {
-  try {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1e3;
-    for (const k of Object.keys(state)) {
-      const entry = state[k];
-      if (typeof entry !== "object" || entry === null) {
-        continue;
-      }
-      const updated = entry.updated;
-      if (typeof updated !== "string") {
-        continue;
-      }
-      const ts = Date.parse(updated);
-      if (Number.isNaN(ts)) {
-        continue;
-      }
-      if (ts < cutoff) {
-        delete state[k];
-      }
-    }
-    const file = stateFile();
-    fs3.mkdirSync(stateDir(), { recursive: true });
-    const tmp = `${file}.tmp`;
-    fs3.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
-    fs3.renameSync(tmp, file);
-  } catch (e) {
-    info(
-      `saveHookState failed: ${e}; state not persisted \u2014 already-exported turns may be re-emitted as duplicates on the next hook run`
-    );
-  }
-}
-function saveSessionState(globalState, key, sessionState) {
-  updateSessionState(globalState, key, sessionState);
-  saveHookState(globalState);
-}
-async function withStateLock(fn) {
-  const lock = lockFile();
-  fs3.mkdirSync(stateDir(), { recursive: true });
-  try {
-    fs3.closeSync(fs3.openSync(lock, "a"));
-  } catch {
-    return fn();
-  }
-  let release = null;
-  try {
-    release = await import_proper_lockfile.default.lock(lock, {
-      realpath: false,
-      stale: 3e4,
-      // ~2s of polling (40 * 50ms), matching the Python 2s lock timeout.
-      retries: { retries: 40, minTimeout: 50, maxTimeout: 50 }
-    });
-    return await fn();
-  } finally {
-    if (release) {
-      try {
-        await release();
-      } catch {
-      }
-    }
-  }
-}
-
-// src/tracer.ts
-init_esm();
-var import_core3 = __toESM(require_src(), 1);
-var import_exporter_trace_otlp_http = __toESM(require_src5(), 1);
-var import_resources = __toESM(require_src2(), 1);
-var import_sdk_trace_base = __toESM(require_src6(), 1);
-var SPAN_TYPE_ATTR = "lmnr.span.type";
-var SPAN_INPUT_ATTR = "lmnr.span.input";
-var SPAN_OUTPUT_ATTR = "lmnr.span.output";
-var ASSOC_PREFIX = "lmnr.association.properties";
-function toOtelAttributes(attrs) {
-  const out = {};
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value === null || value === void 0) {
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-      out[key] = value;
-      continue;
-    }
-    if (Array.isArray(value)) {
-      const arr = value.filter((x) => x !== null && x !== void 0);
-      out[key] = arr;
-      continue;
-    }
-  }
-  return out;
-}
-var CollectingSpanProcessor = class {
-  spans = [];
-  onStart() {
-  }
-  onEnd(span) {
-    this.spans.push(span);
-  }
-  forceFlush() {
-    return Promise.resolve();
-  }
-  shutdown() {
-    return Promise.resolve();
-  }
-};
-var TraceEmitter = class {
-  config;
-  processor;
-  tracer;
-  constructor(config) {
-    this.config = config;
-    this.processor = new CollectingSpanProcessor();
-    const provider = new import_sdk_trace_base.BasicTracerProvider({
-      resource: new import_resources.Resource({
-        "service.name": "claude-code",
-        "telemetry.sdk.language": "nodejs",
-        "telemetry.sdk.name": "lmnr-claude-code-plugin"
-      }),
-      spanProcessors: [this.processor]
-    });
-    this.tracer = provider.getTracer("lmnr.claude_code");
-  }
-  get spans() {
-    return this.processor.spans;
-  }
-  startSpan(name, startTime, attributes, parent) {
-    const parentCtx = parent ? parent.context : ROOT_CONTEXT;
-    const span = this.tracer.startSpan(
-      name,
-      { kind: SpanKind.INTERNAL, startTime, attributes: toOtelAttributes(attributes) },
-      parentCtx
-    );
-    span.setStatus({ code: SpanStatusCode.OK });
-    return new SpanHandle(span, startTime);
-  }
-};
-var SpanHandle = class {
-  context;
-  span;
-  startTime;
-  ended = false;
-  constructor(span, startTime) {
-    this.span = span;
-    this.startTime = startTime;
-    this.context = trace.setSpan(ROOT_CONTEXT, span);
-  }
-  get traceId() {
-    return this.span.spanContext().traceId;
-  }
-  get spanId() {
-    return this.span.spanContext().spanId;
-  }
-  setAttributes(attributes) {
-    this.span.setAttributes(toOtelAttributes(attributes));
-  }
-  end(endTime) {
-    if (this.ended) {
-      return;
-    }
-    this.ended = true;
-    let end = endTime ?? this.startTime;
-    if (end.getTime() < this.startTime.getTime()) {
-      end = this.startTime;
-    }
-    this.span.end(end);
-  }
-};
-function startSpan(emitter, args) {
-  const attrs = { [SPAN_TYPE_ATTR]: args.spanType ?? "DEFAULT" };
-  if (args.inputValue !== void 0 && args.inputValue !== null) {
-    attrs[SPAN_INPUT_ATTR] = jsonDumps(args.inputValue);
-  }
-  if (args.attributes) {
-    Object.assign(attrs, args.attributes);
-  }
-  return emitter.startSpan(args.name, args.startTime ?? /* @__PURE__ */ new Date(), attrs, args.parent);
-}
-async function exportSpans(emitter) {
-  const spans = emitter.spans;
-  if (spans.length === 0) {
-    return true;
-  }
-  const exporter = new import_exporter_trace_otlp_http.OTLPTraceExporter({
-    url: `${emitter.config.baseUrl}/v1/traces`,
-    headers: { Authorization: `Bearer ${emitter.config.apiKey}` },
-    timeoutMillis: Math.round(EXPORT_TIMEOUT_S * 1e3)
-  });
-  try {
-    const result = await new Promise((resolve2) => {
-      exporter.export(spans, resolve2);
-    });
-    if (result.code === import_core3.ExportResultCode.SUCCESS) {
-      debug(`OTLP export: ${spans.length} span(s)`);
-      return true;
-    }
-    info(`OTLP export failed: ${result.error ?? "unknown error"}`);
-    return false;
-  } catch (e) {
-    info(`OTLP export failed: ${e}`);
-    return false;
-  } finally {
-    try {
-      await exporter.shutdown();
-    } catch {
-    }
-  }
-}
-async function exportWithTimeout(emitter) {
-  const timeoutMs = Math.round((EXPORT_TIMEOUT_S + 1) * 1e3);
-  let timer;
-  const timeout = new Promise((resolve2) => {
-    timer = setTimeout(() => resolve2(false), timeoutMs);
-  });
-  try {
-    return await Promise.race([exportSpans(emitter), timeout]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
 // src/subagents.ts
 var fs4 = __toESM(require("node:fs"), 1);
 var path2 = __toESM(require("node:path"), 1);
@@ -26006,19 +25916,6 @@ function getSubagentTranscriptsByToolUseId(transcriptPath) {
   }
   return result;
 }
-function getTaskIdToToolUseId(subagentTranscriptsByToolUseId) {
-  const taskIdToToolUseId = {};
-  if (!subagentTranscriptsByToolUseId) {
-    return taskIdToToolUseId;
-  }
-  for (const [toolUseId, subagent] of Object.entries(subagentTranscriptsByToolUseId)) {
-    const agentId = subagent.agentId;
-    if (typeof agentId === "string" && agentId) {
-      taskIdToToolUseId[agentId] = toolUseId;
-    }
-  }
-  return taskIdToToolUseId;
-}
 function readSubagentJsonl(filePath) {
   let lines;
   try {
@@ -26051,49 +25948,12 @@ function readSubagentJsonl(filePath) {
   return rows;
 }
 
-// src/emit.ts
-function collectSkillTags(turn) {
-  const names = [];
-  for (const assistantMessage of turn.assistantMsgs) {
-    for (const toolUse of getToolUseBlocks(getContentFromRow(assistantMessage))) {
-      if (toolUse.name !== "Skill") {
-        continue;
-      }
-      const toolInput = toolUse.input;
-      const skill = typeof toolInput === "object" && toolInput !== null ? toolInput.skill : null;
-      if (typeof skill === "string" && skill && !names.includes(`skill:${skill}`)) {
-        names.push(`skill:${skill}`);
-      }
-    }
-  }
-  return names;
-}
-function shortSessionLabel(sessionId, maxLen = 12) {
-  const sid = sessionId.trim();
-  if (!sid) {
-    return "unknown";
-  }
-  const parts = sid.split("-");
-  if (parts.length === 5 && parts[0].length === 8) {
-    return parts[0];
-  }
-  return sid.length <= maxLen ? sid : sid.slice(0, maxLen).replace(/-+$/, "");
-}
-function traceDisplayName(sessionId, turnNum) {
-  return `Claude Code - Turn ${turnNum} (${shortSessionLabel(sessionId)})`;
-}
-function getTraceTags(turn) {
-  const tags = ["claude-code"];
-  if (SKILL_TAGS) {
-    tags.push(...collectSkillTags(turn));
-  }
-  return tags;
-}
-function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyAsyncToolResults) {
+// src/genai.ts
+function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults) {
   if (assistantIndex === 0) {
     return [{ role: "user", content: userText }];
   }
-  const toolResults = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
+  const toolResults = [...previousToolResults, ...readyToolResults];
   if (toolResults.length > 0) {
     return toolResults.map((toolResult) => ({
       role: "tool",
@@ -26114,6 +25974,63 @@ function buildGenerationOutputMessage(assistantText, toolUses) {
     }));
   }
   return output;
+}
+function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyToolResults) {
+  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
+  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
+  const model = getModel(assistantMessage);
+  const attrs = {
+    "gen_ai.system": "anthropic",
+    "gen_ai.request.model": model,
+    "gen_ai.response.model": model
+  };
+  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults);
+  if (inputMessages !== null) {
+    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
+  }
+  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
+  const usageDetails = getUsageDetailsFromRow(assistantMessage);
+  if (usageDetails !== null) {
+    let total = 0;
+    for (const [key, value] of Object.entries(usageDetails)) {
+      attrs[`gen_ai.usage.${key}`] = value;
+      total += value;
+    }
+    attrs["llm.usage.total_tokens"] = total;
+  }
+  return [attrs, toolUses];
+}
+
+// src/emit.ts
+function collectSkillNames(turn) {
+  const names = [];
+  for (const assistantMessage of turn.assistantMsgs) {
+    for (const toolUse of getToolUseBlocks(getContentFromRow(assistantMessage))) {
+      if (toolUse.name !== "Skill") {
+        continue;
+      }
+      const toolInput = toolUse.input;
+      const skill = typeof toolInput === "object" && toolInput !== null ? toolInput.skill : null;
+      if (typeof skill === "string" && skill && !names.includes(skill)) {
+        names.push(skill);
+      }
+    }
+  }
+  return names;
+}
+function shortSessionLabel(sessionId, maxLen = 12) {
+  const sid = sessionId.trim();
+  if (!sid) {
+    return "unknown";
+  }
+  const parts = sid.split("-");
+  if (parts.length === 5 && parts[0].length === 8) {
+    return parts[0];
+  }
+  return sid.length <= maxLen ? sid : sid.slice(0, maxLen).replace(/-+$/, "");
+}
+function traceDisplayName(sessionId, turnNum) {
+  return `Claude Code - Turn ${turnNum} (${shortSessionLabel(sessionId)})`;
 }
 function getToolInputForObservation(toolUse) {
   const raw = toolUse.input;
@@ -26284,31 +26201,6 @@ function updatePendingSubagentDisplayStartAfterLaunchResponse(pendingSubagents, 
     }
   }
 }
-function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyAsyncToolResults) {
-  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
-  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
-  const model = getModel(assistantMessage);
-  const attrs = {
-    "gen_ai.system": "anthropic",
-    "gen_ai.request.model": model,
-    "gen_ai.response.model": model
-  };
-  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyAsyncToolResults);
-  if (inputMessages !== null) {
-    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
-  }
-  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
-  const usageDetails = getUsageDetailsFromRow(assistantMessage);
-  if (usageDetails !== null) {
-    let total = 0;
-    for (const [key, value] of Object.entries(usageDetails)) {
-      attrs[`gen_ai.usage.${key}`] = value;
-      total += value;
-    }
-    attrs["llm.usage.total_tokens"] = total;
-  }
-  return [attrs, toolUses];
-}
 function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp) {
   const p = subagent.path;
   if (typeof p !== "string") {
@@ -26389,7 +26281,7 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       assistantMessage,
       userText,
       previousToolResults,
-      readyAsyncToolResults
+      readyAsyncToolResults.map((r) => r.toolResult)
     );
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
@@ -26450,17 +26342,28 @@ function getTurnEndTimestamp(turn) {
 function buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPath) {
   const attrs = {
     [`${ASSOC_PREFIX}.session_id`]: sessionId,
-    [`${ASSOC_PREFIX}.tags`]: getTraceTags(turn),
+    // A single coarse discriminator tag; everything else that's constant across
+    // the turn goes in metadata (see below), which the SDKs reserve for
+    // trace-wide values. Per-span detail stays on span attributes.
+    [`${ASSOC_PREFIX}.tags`]: ["claude-code"],
     [`${ASSOC_PREFIX}.metadata.source`]: "claude-code",
     [`${ASSOC_PREFIX}.metadata.turn_number`]: String(turnNum),
-    [`${ASSOC_PREFIX}.metadata.transcript`]: getShortTranscriptPathForMetadata(transcriptPath) ?? ""
+    [`${ASSOC_PREFIX}.metadata.transcript`]: getShortTranscriptPathForMetadata(transcriptPath) ?? "",
+    [`${ASSOC_PREFIX}.metadata.os`]: process.platform
   };
   if (config.userId) {
     attrs[`${ASSOC_PREFIX}.user_id`] = config.userId;
   }
+  if (SKILL_TAGS) {
+    const skills = collectSkillNames(turn);
+    if (skills.length > 0) {
+      attrs[`${ASSOC_PREFIX}.metadata.skills`] = skills.join(",");
+    }
+  }
   for (const [srcKey, dstKey] of [
     ["cwd", "cwd"],
-    ["gitBranch", "git_branch"]
+    ["gitBranch", "git_branch"],
+    ["version", "claude_code_version"]
   ]) {
     const value = turn.userMsg[srcKey];
     if (typeof value === "string" && value) {
@@ -26488,6 +26391,167 @@ function emitTurn(emitter, config, sessionId, turnNum, turn, transcriptPath, sub
   rootSpan.setAttributes({ [SPAN_OUTPUT_ATTR]: jsonDumps({ role: "assistant", content: finalAssistantText }) });
   rootSpan.end(getLatestTimestamp(turnEndTs, lastAssistantTs, obsEndTs, userTs));
 }
+
+// src/state.ts
+var crypto2 = __toESM(require("node:crypto"), 1);
+var fs5 = __toESM(require("node:fs"), 1);
+var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
+function coerceRows(value) {
+  return Array.isArray(value) ? value : [];
+}
+function coercePendingAgentTurns(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const e = entry;
+    if (!Array.isArray(e.pendingToolUseIds) || !Array.isArray(e.resolvedToolUseIds) || !Array.isArray(e.rows)) {
+      continue;
+    }
+    out.push({
+      pendingToolUseIds: e.pendingToolUseIds.filter((x) => typeof x === "string"),
+      resolvedToolUseIds: e.resolvedToolUseIds.filter((x) => typeof x === "string"),
+      rows: coerceRows(e.rows)
+    });
+  }
+  return out;
+}
+var SessionState = class _SessionState {
+  offset;
+  // Last byte read from the transcript file.
+  buffer;
+  // Partial JSONL line kept between hook runs.
+  turnCount;
+  // Turns already emitted for this session.
+  pendingAgentTurns;
+  // Task-notification rows whose tool_use_id could not be resolved yet
+  // (task-id-only and the subagent meta.json not on disk); retried each run.
+  pendingTaskNotifications;
+  // Raw rows of an incomplete trailing turn (a user prompt whose assistant
+  // response has not been written yet) held back so the next hook run re-reads
+  // it together with the response. Guards against the transcript being flushed
+  // between the Stop hook firing and the assistant row landing.
+  pendingTurnRows;
+  constructor(init = {}) {
+    this.offset = init.offset ?? 0;
+    this.buffer = init.buffer ?? "";
+    this.turnCount = init.turnCount ?? 0;
+    this.pendingAgentTurns = init.pendingAgentTurns ?? [];
+    this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
+    this.pendingTurnRows = init.pendingTurnRows ?? [];
+  }
+  /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
+  static fromJSON(raw) {
+    const s = typeof raw === "object" && raw !== null ? raw : {};
+    return new _SessionState({
+      offset: Number(s.offset ?? 0),
+      buffer: String(s.buffer ?? ""),
+      turnCount: Number(s.turnCount ?? 0),
+      pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
+      pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
+      pendingTurnRows: coerceRows(s.pendingTurnRows)
+    });
+  }
+  /** Project to the persisted shape. The `updated` bookkeeping field is stamped by the writer. */
+  toJSON() {
+    return {
+      offset: this.offset,
+      buffer: this.buffer,
+      turnCount: this.turnCount,
+      pendingAgentTurns: this.pendingAgentTurns,
+      pendingTaskNotifications: this.pendingTaskNotifications,
+      pendingTurnRows: this.pendingTurnRows
+    };
+  }
+};
+function loadHookState() {
+  try {
+    const file = stateFile();
+    if (!fs5.existsSync(file)) {
+      return {};
+    }
+    return JSON.parse(fs5.readFileSync(file, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+function getSessionStateKey(sessionId, transcriptPath) {
+  const raw = `${sessionId}::${transcriptPath}`;
+  return crypto2.createHash("sha256").update(raw, "utf-8").digest("hex");
+}
+function getSessionState(globalState, key) {
+  return SessionState.fromJSON(globalState[key]);
+}
+function updateSessionState(globalState, key, sessionState) {
+  globalState[key] = { ...sessionState.toJSON(), updated: (/* @__PURE__ */ new Date()).toISOString() };
+}
+function saveHookState(state) {
+  try {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1e3;
+    for (const k of Object.keys(state)) {
+      const entry = state[k];
+      if (typeof entry !== "object" || entry === null) {
+        continue;
+      }
+      const updated = entry.updated;
+      if (typeof updated !== "string") {
+        continue;
+      }
+      const ts = Date.parse(updated);
+      if (Number.isNaN(ts)) {
+        continue;
+      }
+      if (ts < cutoff) {
+        delete state[k];
+      }
+    }
+    const file = stateFile();
+    fs5.mkdirSync(stateDir(), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs5.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+    fs5.renameSync(tmp, file);
+  } catch (e) {
+    info(
+      `saveHookState failed: ${e}; state not persisted \u2014 already-exported turns may be re-emitted as duplicates on the next hook run`
+    );
+  }
+}
+function saveSessionState(globalState, key, sessionState) {
+  updateSessionState(globalState, key, sessionState);
+  saveHookState(globalState);
+}
+async function withStateLock(fn) {
+  const lock = lockFile();
+  fs5.mkdirSync(stateDir(), { recursive: true });
+  try {
+    fs5.closeSync(fs5.openSync(lock, "a"));
+  } catch {
+    return fn();
+  }
+  let release = null;
+  try {
+    release = await import_proper_lockfile.default.lock(lock, {
+      realpath: false,
+      stale: 3e4,
+      // ~2s of polling (40 * 50ms), matching the Python 2s lock timeout.
+      retries: { retries: 40, minTimeout: 50, maxTimeout: 50 }
+    });
+    return await fn();
+  } finally {
+    if (release) {
+      try {
+        await release();
+      } catch {
+      }
+    }
+  }
+}
+
+// src/pipeline.ts
 function emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit, sessionState, subagentMap, emitTurnFn = emitTurn) {
   let emitted = 0;
   for (const turn of turnsToEmit) {
@@ -26590,7 +26654,7 @@ async function emitNewTurnsFromTranscript(emitter, config, sessionId, transcript
 // src/hook.ts
 function readStdin() {
   try {
-    return fs5.readFileSync(0, "utf-8");
+    return fs6.readFileSync(0, "utf-8");
   } catch {
     return "";
   }
@@ -26639,7 +26703,7 @@ function getSessionIdAndTranscriptPath(payload) {
     debug("Missing session_id or transcript_path from hook payload; exiting.");
     return null;
   }
-  if (!fs5.existsSync(transcriptPath)) {
+  if (!fs6.existsSync(transcriptPath)) {
     debug(`Transcript path does not exist: ${transcriptPath}`);
     return null;
   }

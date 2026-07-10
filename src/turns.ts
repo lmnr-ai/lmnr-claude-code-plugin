@@ -12,7 +12,7 @@ import {
   getToolUseIdForTaskNotification,
   isTaskNotificationRow,
 } from "./notifications.js";
-import { jsonDumps } from "./util.js";
+import { getAsyncLaunchFlagFromRow } from "./deferral.js";
 import type { Json, Row } from "./types.js";
 
 // ----------------- Turn model -----------------
@@ -48,49 +48,6 @@ class TurnAssemblyState {
   toolUseTimestampsById: Record<string, Json> = {};
   injectedByToolId: Record<string, string> = {};
   currentRows: Row[] = [];
-}
-
-// ----------------- Async-launch detection (shared with deferral) -----------------
-export function getToolResultText(toolResultEntry: ToolResultEntry | undefined): string {
-  if (!toolResultEntry) {
-    return "";
-  }
-  const toolResultContent = toolResultEntry.content;
-  if (typeof toolResultContent === "string") {
-    return toolResultContent;
-  }
-  return jsonDumps(toolResultContent);
-}
-
-/**
- * Read the structured async marker Claude Code puts on tool_result rows.
- * Returns null when the row carries no toolUseResult (older Claude Code
- * versions), so callers can fall back to the launch-text heuristic.
- */
-export function getAsyncLaunchFlagFromRow(row: Row): boolean | null {
-  const toolUseResult = row.toolUseResult;
-  if (typeof toolUseResult !== "object" || toolUseResult === null) {
-    return null;
-  }
-  return toolUseResult.status === "async_launched" || toolUseResult.isAsync === true;
-}
-
-export function isAsyncAgentLaunchResult(toolResultEntry: ToolResultEntry | undefined): boolean {
-  if (!toolResultEntry) {
-    return false;
-  }
-  // Prefer the structured toolUseResult marker: launch-text matching also
-  // fires on tool results that merely quote it (e.g. reading this file).
-  if (toolResultEntry.isAsyncLaunch != null) {
-    return toolResultEntry.isAsyncLaunch;
-  }
-  const toolResultText = getToolResultText(toolResultEntry);
-  return (
-    toolResultText.includes("Async agent launched successfully") ||
-    (toolResultText.includes("agentId:") &&
-      toolResultText.includes("output_file:") &&
-      toolResultText.includes("You will be notified automatically"))
-  );
 }
 
 // ----------------- Turn assembly -----------------

@@ -14,12 +14,14 @@ Laminar observability plugin for Claude Code. Stop/SessionEnd hooks parse the se
   - `logger.ts` — size-rotated debug/info log.
   - `state.ts` — `SessionState`, per-session state persistence, `withStateLock` (`proper-lockfile`).
   - `transcript.ts` — row helpers + incremental JSONL reading (byte offset + partial-line buffer).
-  - `turns.ts` — turn assembly (`buildTurns`, `mergeAssistantRows`, async-launch detection).
-  - `notifications.ts` — `<task-notification>` parsing.
-  - `deferral.ts` — async-agent deferral + task-notification resolution.
+  - `turns.ts` — turn assembly (`buildTurns`, `mergeAssistantRows`).
+  - `notifications.ts` — `<task-notification>` row format parsing.
+  - `deferral.ts` — **async-agent lifecycle**: launch detection (`isAsyncAgentLaunchResult`), deferral/stash/retry (`resolveDeferredAgentTurns`), and the agentId→toolUseId attribution bridge (`getTaskIdToToolUseId`).
   - `subagents.ts` — subagent transcript discovery/reading.
   - `tracer.ts` — OTel provider + collecting span processor, `startSpan`/`SpanHandle`, `exportWithTimeout`.
-  - `emit.ts` — span emission (root/LLM/tool/subagent) + orchestration (`emitNewTurnsFromTranscript`).
+  - `genai.ts` — `gen_ai.*` wire-format serialization (Anthropic→OpenAI-style messages, usage) via `buildGenerationAttributes`.
+  - `emit.ts` — Turn → OTel span **renderer** (root/LLM/tool/subagent spans); `emitTurn`.
+  - `pipeline.ts` — transcript → turns → export **orchestration** (`emitNewTurnsFromTranscript`, `emitReadyTurns`); owns fs/offset/state and export gating, delegates rendering to `emit.ts`.
   - `util.ts` / `types.ts` — `jsonDumps`/`getLatestTimestamp`; shared `Row`/`Json` aliases.
 - `tests/` — `node:test` suite run via `tsx --test`; `helpers.ts` builds transcript rows and reads collected spans.
 
@@ -45,4 +47,4 @@ Laminar observability plugin for Claude Code. Stop/SessionEnd hooks parse the se
 - **Unterminated final line flush:** `readNewJsonl` holds the segment after the last newline in `sessionState.buffer` as a partial line. At SessionEnd (`flushBuffer=true`), a buffered segment that parses as complete JSON is flushed as a row — otherwise a transcript ending without a trailing newline would strand its final row in the buffer forever (offset is already at EOF, so later runs read zero bytes). A genuinely partial line always fails `JSON.parse` and stays buffered. Pinned by the "complete unterminated final line flushed at session end" test.
 - **Incomplete trailing turn hold (`pendingTurnRows`):** if a batch ends with a user prompt that has no assistant row yet, its raw rows are held in state and replayed (prepended) on the next run instead of being dropped — the offset still advances, but the rows are re-processed from state. This guards against the transcript being flushed between the `Stop` hook firing and the assistant row landing (observed with headless `claude -p`, where the user row would otherwise be consumed on `Stop` and the assistant orphaned on `SessionEnd`, losing the turn). SessionEnd never holds — it flushes everything. A turn with an assistant row is emitted immediately (no one-turn delay in the common interactive case). Pinned by the "incomplete trailing turn (flush race)" test.
 - The state file (`~/.claude/state/lmnr_state.json`, or under `CC_LMNR_STATE_DIR`) is purely local plugin state — no external consumer reads it — so its keys use the same camelCase convention as the rest of the code. The only fields serialized verbatim are raw Claude Code transcript rows (inside `pendingAgentTurns[].rows` / `pendingTurnRows` / `pendingTaskNotifications`); everything the code owns is a typed shape (`SessionState`, `PendingAgentTurn`, `ToolResultEntry`). Wire/OTLP names are the exception and stay in their required forms: `gen_ai.usage.*` keys, OpenAI-style `tool_call_id`/`name` in tool messages, `lmnr.*` attributes.
-- Keep `emitReadyTurns` / `emitNewTurnsFromTranscript`'s test seams (`emitTurnFn` / `exportFn` injection): ESM can't monkeypatch imported bindings, so these are the injection points the tests use to simulate emit/export failure.
+- Keep `emitReadyTurns` / `emitNewTurnsFromTranscript`'s test seams (`emitTurnFn` / `exportFn` injection, both in `pipeline.ts`): ESM can't monkeypatch imported bindings, so these are the injection points the tests use to simulate emit/export failure.
