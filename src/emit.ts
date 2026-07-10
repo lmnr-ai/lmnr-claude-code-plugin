@@ -6,9 +6,7 @@ import { isTaskNotificationRow } from "./notifications.js";
 import {
   extractTextFromContent,
   getContentFromRow,
-  getModel,
   getToolUseBlocks,
-  getUsageDetailsFromRow,
   getUserOrAssistantRoleFromRow,
   isToolResult,
   parseTimestamp,
@@ -18,16 +16,11 @@ import {
 import { ASSOC_PREFIX, SPAN_OUTPUT_ATTR, startSpan, TraceEmitter, exportWithTimeout, type SpanHandle } from "./tracer.js";
 import { buildTurns, type ToolResultEntry, type Turn } from "./turns.js";
 import { getSubagentTranscriptsByToolUseId, getTaskIdToToolUseId, readSubagentJsonl, type SubagentTranscript } from "./subagents.js";
+import { buildGenerationAttributes, type GenerationToolResult } from "./genai.js";
 import type { Json, Row } from "./types.js";
 import { getLatestTimestamp, jsonDumps } from "./util.js";
 
 // ----------------- Emission internal shapes -----------------
-interface GenerationToolResult {
-  toolUseId: string;
-  toolName: string;
-  output: Json;
-}
-
 interface PendingSubagent {
   toolUseId: string;
   subagent: SubagentTranscript;
@@ -103,43 +96,6 @@ function getTraceTags(turn: Turn): string[] {
     tags.push(...collectSkillTags(turn));
   }
   return tags;
-}
-
-// ----------------- Generation payloads -----------------
-function buildGenerationInputMessages(
-  assistantIndex: number,
-  userText: string,
-  previousToolResults: GenerationToolResult[],
-  readyAsyncToolResults: PendingAsyncToolResult[]
-): Row[] | null {
-  if (assistantIndex === 0) {
-    return [{ role: "user", content: userText }];
-  }
-  // Both feed the next generation's context: results from the previous tool
-  // batch AND async agent results that became ready since.
-  const toolResults = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
-  if (toolResults.length > 0) {
-    // tool_call_id / name are the OpenAI-style wire field names (kept verbatim).
-    return toolResults.map((toolResult) => ({
-      role: "tool",
-      content: jsonDumps(toolResult.output),
-      tool_call_id: toolResult.toolUseId,
-      name: toolResult.toolName,
-    }));
-  }
-  return null;
-}
-
-function buildGenerationOutputMessage(assistantText: string, toolUses: Row[]): Row {
-  const output: Row = { role: "assistant", content: assistantText || "" };
-  if (toolUses.length > 0) {
-    output.tool_calls = toolUses.map((toolUse) => ({
-      id: toolUse.id,
-      name: toolUse.name,
-      arguments: typeof toolUse.input === "object" && toolUse.input !== null && !Array.isArray(toolUse.input) ? toolUse.input : {},
-    }));
-  }
-  return output;
 }
 
 // ----------------- Tool spans -----------------
@@ -371,42 +327,6 @@ function updatePendingSubagentDisplayStartAfterLaunchResponse(
   }
 }
 
-function buildGenerationAttributes(
-  assistantIndex: number,
-  assistantMessage: Row,
-  userText: string,
-  previousToolResults: GenerationToolResult[],
-  readyAsyncToolResults: PendingAsyncToolResult[]
-): [Record<string, Json>, Row[]] {
-  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
-  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
-
-  const model = getModel(assistantMessage);
-  const attrs: Record<string, Json> = {
-    "gen_ai.system": "anthropic",
-    "gen_ai.request.model": model,
-    "gen_ai.response.model": model,
-  };
-
-  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyAsyncToolResults);
-  if (inputMessages !== null) {
-    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
-  }
-  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
-
-  const usageDetails = getUsageDetailsFromRow(assistantMessage);
-  if (usageDetails !== null) {
-    let total = 0;
-    for (const [key, value] of Object.entries(usageDetails)) {
-      attrs[`gen_ai.usage.${key}`] = value;
-      total += value;
-    }
-    attrs["llm.usage.total_tokens"] = total;
-  }
-
-  return [attrs, toolUses];
-}
-
 function emitSubagentObservations(
   emitter: TraceEmitter,
   parentSpan: SpanHandle,
@@ -511,7 +431,7 @@ function emitTurnObservations(
       assistantMessage,
       userText,
       previousToolResults,
-      readyAsyncToolResults
+      readyAsyncToolResults.map((r) => r.toolResult)
     );
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {

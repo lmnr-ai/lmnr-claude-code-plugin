@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 process.env.CC_LMNR_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-testlog-"));
 
 import { getPendingAgentToolUseIds, getTurnsToEmit } from "../src/deferral.js";
+import { buildGenerationAttributes } from "../src/genai.js";
 import { getSessionState, SessionState, updateSessionState, type GlobalState } from "../src/state.js";
 import { extractTextFromContent, getUsageDetailsFromRow, readNewJsonl, truncateText } from "../src/transcript.js";
 import { buildTurns, mergeAssistantRows } from "../src/turns.js";
@@ -357,5 +358,65 @@ describe("SessionState serialization", () => {
     assert.equal(reloaded.turnCount, 0);
     assert.deepEqual(reloaded.pendingAgentTurns, []);
     assert.deepEqual(reloaded.pendingTaskNotifications, []);
+  });
+});
+
+describe("gen_ai wire-format serialization", () => {
+  const parse = (v: any) => JSON.parse(v as string);
+
+  it("first generation uses the user prompt as input, and reports usage", () => {
+    const [attrs, toolUses] = buildGenerationAttributes(0, assistantRow([{ type: "text", text: "hello" }]), "the question", [], []);
+    assert.deepEqual(parse(attrs["gen_ai.input.messages"]), [{ role: "user", content: "the question" }]);
+    const output = parse(attrs["gen_ai.output.messages"]);
+    assert.equal(output[0].role, "assistant");
+    assert.equal(output[0].content, "hello");
+    assert.equal(attrs["gen_ai.system"], "anthropic");
+    assert.equal(attrs["gen_ai.usage.input_tokens"], 10);
+    assert.equal(attrs["gen_ai.usage.output_tokens"], 5);
+    assert.equal(attrs["llm.usage.total_tokens"], 15);
+    assert.equal(toolUses.length, 0);
+  });
+
+  it("later generations fold previous tool results into OpenAI-style tool messages", () => {
+    const [attrs] = buildGenerationAttributes(
+      1,
+      assistantRow([{ type: "text", text: "done" }]),
+      "ignored after first generation",
+      [{ toolUseId: "t1", toolName: "Bash", output: "ok" }],
+      []
+    );
+    const input = parse(attrs["gen_ai.input.messages"]);
+    assert.equal(input.length, 1);
+    assert.equal(input[0].role, "tool");
+    assert.equal(input[0].tool_call_id, "t1");
+    assert.equal(input[0].name, "Bash");
+  });
+
+  it("folds ready async results alongside previous tool results", () => {
+    const [attrs] = buildGenerationAttributes(
+      1,
+      assistantRow([{ type: "text", text: "done" }]),
+      "",
+      [{ toolUseId: "t1", toolName: "Bash", output: "ok" }],
+      [{ toolUseId: "a1", toolName: "Agent", output: "async-result" }]
+    );
+    const input = parse(attrs["gen_ai.input.messages"]);
+    assert.deepEqual(
+      input.map((m: any) => m.tool_call_id),
+      ["t1", "a1"]
+    );
+  });
+
+  it("emits tool_calls on the output message when the assistant calls tools", () => {
+    const asst = assistantRow([
+      { type: "text", text: "calling" },
+      { type: "tool_use", id: "u1", name: "Read", input: { path: "/x" } },
+    ]);
+    const [attrs, toolUses] = buildGenerationAttributes(0, asst, "q", [], []);
+    const output = parse(attrs["gen_ai.output.messages"]);
+    assert.equal(output[0].tool_calls[0].id, "u1");
+    assert.equal(output[0].tool_calls[0].name, "Read");
+    assert.deepEqual(output[0].tool_calls[0].arguments, { path: "/x" });
+    assert.equal(toolUses.length, 1);
   });
 });

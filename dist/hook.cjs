@@ -26082,6 +26082,59 @@ function readSubagentJsonl(filePath) {
   return rows;
 }
 
+// src/genai.ts
+function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults) {
+  if (assistantIndex === 0) {
+    return [{ role: "user", content: userText }];
+  }
+  const toolResults = [...previousToolResults, ...readyToolResults];
+  if (toolResults.length > 0) {
+    return toolResults.map((toolResult) => ({
+      role: "tool",
+      content: jsonDumps(toolResult.output),
+      tool_call_id: toolResult.toolUseId,
+      name: toolResult.toolName
+    }));
+  }
+  return null;
+}
+function buildGenerationOutputMessage(assistantText, toolUses) {
+  const output = { role: "assistant", content: assistantText || "" };
+  if (toolUses.length > 0) {
+    output.tool_calls = toolUses.map((toolUse) => ({
+      id: toolUse.id,
+      name: toolUse.name,
+      arguments: typeof toolUse.input === "object" && toolUse.input !== null && !Array.isArray(toolUse.input) ? toolUse.input : {}
+    }));
+  }
+  return output;
+}
+function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyToolResults) {
+  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
+  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
+  const model = getModel(assistantMessage);
+  const attrs = {
+    "gen_ai.system": "anthropic",
+    "gen_ai.request.model": model,
+    "gen_ai.response.model": model
+  };
+  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults);
+  if (inputMessages !== null) {
+    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
+  }
+  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
+  const usageDetails = getUsageDetailsFromRow(assistantMessage);
+  if (usageDetails !== null) {
+    let total = 0;
+    for (const [key, value] of Object.entries(usageDetails)) {
+      attrs[`gen_ai.usage.${key}`] = value;
+      total += value;
+    }
+    attrs["llm.usage.total_tokens"] = total;
+  }
+  return [attrs, toolUses];
+}
+
 // src/emit.ts
 function collectSkillTags(turn) {
   const names = [];
@@ -26119,32 +26172,6 @@ function getTraceTags(turn) {
     tags.push(...collectSkillTags(turn));
   }
   return tags;
-}
-function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyAsyncToolResults) {
-  if (assistantIndex === 0) {
-    return [{ role: "user", content: userText }];
-  }
-  const toolResults = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
-  if (toolResults.length > 0) {
-    return toolResults.map((toolResult) => ({
-      role: "tool",
-      content: jsonDumps(toolResult.output),
-      tool_call_id: toolResult.toolUseId,
-      name: toolResult.toolName
-    }));
-  }
-  return null;
-}
-function buildGenerationOutputMessage(assistantText, toolUses) {
-  const output = { role: "assistant", content: assistantText || "" };
-  if (toolUses.length > 0) {
-    output.tool_calls = toolUses.map((toolUse) => ({
-      id: toolUse.id,
-      name: toolUse.name,
-      arguments: typeof toolUse.input === "object" && toolUse.input !== null && !Array.isArray(toolUse.input) ? toolUse.input : {}
-    }));
-  }
-  return output;
 }
 function getToolInputForObservation(toolUse) {
   const raw = toolUse.input;
@@ -26315,31 +26342,6 @@ function updatePendingSubagentDisplayStartAfterLaunchResponse(pendingSubagents, 
     }
   }
 }
-function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyAsyncToolResults) {
-  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
-  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
-  const model = getModel(assistantMessage);
-  const attrs = {
-    "gen_ai.system": "anthropic",
-    "gen_ai.request.model": model,
-    "gen_ai.response.model": model
-  };
-  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyAsyncToolResults);
-  if (inputMessages !== null) {
-    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
-  }
-  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
-  const usageDetails = getUsageDetailsFromRow(assistantMessage);
-  if (usageDetails !== null) {
-    let total = 0;
-    for (const [key, value] of Object.entries(usageDetails)) {
-      attrs[`gen_ai.usage.${key}`] = value;
-      total += value;
-    }
-    attrs["llm.usage.total_tokens"] = total;
-  }
-  return [attrs, toolUses];
-}
 function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp) {
   const p = subagent.path;
   if (typeof p !== "string") {
@@ -26420,7 +26422,7 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       assistantMessage,
       userText,
       previousToolResults,
-      readyAsyncToolResults
+      readyAsyncToolResults.map((r) => r.toolResult)
     );
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
