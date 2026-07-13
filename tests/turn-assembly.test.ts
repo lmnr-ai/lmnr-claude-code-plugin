@@ -529,6 +529,56 @@ describe("user_id resolution", () => {
   });
 });
 
+describe("api key / base url resolution", () => {
+  it("reads projectApiKey + baseUrl from ~/.config/lmnr/claude-code-plugin.json, env overrides", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-plugincfg-"));
+    const saved: Record<string, string | undefined> = {};
+    const set = (k: string, v: string | undefined) => {
+      if (!(k in saved)) saved[k] = process.env[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    };
+    try {
+      // Clear every env source so the file is the only key provider.
+      for (const k of [
+        "CLAUDE_PLUGIN_OPTION_LMNR_PROJECT_API_KEY",
+        "LMNR_PROJECT_API_KEY",
+        "CC_LMNR_PROJECT_API_KEY",
+        "CLAUDE_PLUGIN_OPTION_LMNR_BASE_URL",
+        "LMNR_BASE_URL",
+        "CC_LMNR_BASE_URL",
+      ]) {
+        set(k, undefined);
+      }
+      set("XDG_CONFIG_HOME", dir);
+
+      // No file, no env → no key → null config.
+      assert.equal(getLaminarConfig(), null);
+
+      // File provides the key and base url.
+      fs.mkdirSync(path.join(dir, "lmnr"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "lmnr", "claude-code-plugin.json"),
+        JSON.stringify({ projectApiKey: "file-key", baseUrl: "http://localhost:8000/" })
+      );
+      const cfg = getLaminarConfig()!;
+      assert.equal(cfg.apiKey, "file-key");
+      assert.equal(cfg.baseUrl, "http://localhost:8000"); // trailing slash trimmed
+
+      // Env key overrides the file; base url falls back to default when unset.
+      set("LMNR_PROJECT_API_KEY", "env-key");
+      set("XDG_CONFIG_HOME", os.tmpdir()); // point away from the file for baseUrl
+      assert.equal(getLaminarConfig()!.apiKey, "env-key");
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("gen_ai wire-format serialization", () => {
   const parse = (v: any) => JSON.parse(v as string);
 

@@ -40,6 +40,34 @@ function readLoggedInUserId(): string | null {
   }
 }
 
+/**
+ * Laminar plugin config written by `lmnr-cli plugin add claude-code`
+ * (`~/.config/lmnr/claude-code-plugin.json`). This is the primary source for the
+ * project API key: Codex has no per-plugin secret store, so both plugins share
+ * this file convention rather than each agent's bespoke config surface. Plain,
+ * unencrypted, and read fail-open (missing/unreadable → {}).
+ */
+function readAgentPluginConfig(): { projectApiKey?: string; baseUrl?: string } {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(lmnrConfigDir(), "claude-code-plugin.json"), "utf-8"),
+    );
+    if (typeof raw !== "object" || raw === null) {
+      return {};
+    }
+    const out: { projectApiKey?: string; baseUrl?: string } = {};
+    if (typeof raw.projectApiKey === "string" && raw.projectApiKey) {
+      out.projectApiKey = raw.projectApiKey;
+    }
+    if (typeof raw.baseUrl === "string" && raw.baseUrl) {
+      out.baseUrl = raw.baseUrl;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // ----------------- Paths -----------------
 // Resolved at call time (not module load) so CC_LMNR_STATE_DIR can relocate the
 // state directory and tests can point it at a temp dir.
@@ -79,8 +107,15 @@ export interface LaminarConfig {
 }
 
 export function getLaminarConfig(): LaminarConfig | null {
-  const apiKey = opt("LMNR_PROJECT_API_KEY") || opt("CC_LMNR_PROJECT_API_KEY");
-  const baseUrl = (opt("LMNR_BASE_URL") || opt("CC_LMNR_BASE_URL") || "https://api.lmnr.ai").replace(/\/+$/, "");
+  // Env wins (override / CI); otherwise the file written by `lmnr-cli plugin add`.
+  const fileCfg = readAgentPluginConfig();
+  const apiKey = opt("LMNR_PROJECT_API_KEY") || opt("CC_LMNR_PROJECT_API_KEY") || fileCfg.projectApiKey || "";
+  const baseUrl = (
+    opt("LMNR_BASE_URL") ||
+    opt("CC_LMNR_BASE_URL") ||
+    fileCfg.baseUrl ||
+    "https://api.lmnr.ai"
+  ).replace(/\/+$/, "");
   // Explicit config wins; otherwise fall back to the logged-in CLI identity.
   const userId = opt("LMNR_USER_ID") || readLoggedInUserId() || null;
 

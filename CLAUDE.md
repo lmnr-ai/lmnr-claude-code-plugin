@@ -4,13 +4,13 @@ Laminar observability plugin for Claude Code. Stop/SessionEnd hooks parse the se
 
 ## Layout
 
-- `.claude-plugin/plugin.json` — plugin manifest with `userConfig` (API key is `sensitive: true`).
+- `.claude-plugin/plugin.json` — plugin manifest (no `userConfig`; the plugin is config-file-driven and installs with zero prompts, symmetric with the Codex plugin).
 - `.claude-plugin/marketplace.json` — marketplace manifest so `claude plugin marketplace add lmnr-ai/lmnr-claude-code-plugin` works.
 - `hooks/hooks.json` — wires Stop + SessionEnd to `node ${CLAUDE_PLUGIN_ROOT}/dist/hook.cjs`.
 - `dist/hook.cjs` — **committed** esbuild bundle (all deps inlined). This is what the hooks run; end users install nothing. Rebuild + commit after any `src/` change (`npm run build`).
 - `src/` — the hook, split by concern:
   - `hook.ts` — entrypoint: read stdin payload, resolve session/transcript, orchestrate, always exit 0.
-  - `config.ts` — env/userConfig reader (`opt`), `LaminarConfig`, path resolvers (`stateDir`/`stateFile`/`lockFile`/`logFile`, overridable via `CC_LMNR_STATE_DIR`).
+  - `config.ts` — config reader: API key + base URL come from `~/.config/lmnr/claude-code-plugin.json` (written by `lmnr-cli plugin add claude-code`), with `LMNR_PROJECT_API_KEY`/`LMNR_BASE_URL` env as overrides; `user_id` from `LMNR_USER_ID` env or `credentials.json`. Also `LaminarConfig`, path resolvers (`stateDir`/`stateFile`/`lockFile`/`logFile`, overridable via `CC_LMNR_STATE_DIR`).
   - `logger.ts` — size-rotated debug/info log.
   - `state.ts` — `SessionState`, per-session state persistence, `withStateLock` (`proper-lockfile`).
   - `transcript.ts` — row helpers + incremental JSONL reading (byte offset + partial-line buffer).

@@ -10,26 +10,5 @@
   "homepage": "https://github.com/lmnr-ai/lmnr-claude-code-plugin",
   "repository": "https://github.com/lmnr-ai/lmnr-claude-code-plugin",
   "license": "Apache-2.0",
-  "keywords": ["observability", "tracing", "laminar", "opentelemetry"],
-  "userConfig": {
-    "LMNR_PROJECT_API_KEY": {
-      "type": "string",
-      "title": "Laminar project API key",
-      "description": "Laminar project API key (create one in your project settings at https://www.lmnr.ai)",
-      "required": true,
-      "sensitive": true
-    },
-    "LMNR_BASE_URL": {
-      "type": "string",
-      "title": "Laminar base URL",
-      "description": "Laminar base URL. Keep the default for Laminar Cloud; for self-hosted use e.g. http://localhost:8000",
-      "default": "https://api.lmnr.ai"
-    },
-    "LMNR_USER_ID": {
-      "type": "string",
-      "title": "User id",
-      "description": "Optional user id to associate with traces. If unset, the identity from `lmnr-cli login` (~/.config/lmnr/credentials.json) is used when present.",
-      "default": ""
-    }
-  }
+  "keywords": ["observability", "tracing", "laminar", "opentelemetry"]
 }
