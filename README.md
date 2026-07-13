@@ -21,25 +21,32 @@ blocked or slowed down by more than a few seconds.
 ## Installation
 
 ```
-claude plugin marketplace add lmnr-ai/lmnr-claude-code-plugin
-claude plugin install laminar@laminar
+lmnr-cli plugin add claude-code
 ```
 
-When prompted during install, paste your Laminar project API key (create one in
-your project settings at [lmnr.ai](https://www.lmnr.ai)). No `npm install` is
-needed — the runtime bundle is committed to the plugin.
+This logs you in, lets you pick the Laminar project that should receive your
+Claude Code traces, mints a project API key, writes it to
+`~/.config/lmnr/claude-code-plugin.json`, and installs the plugin. No `npm
+install` is needed — the runtime bundle is committed to the plugin.
 
 ## Configuration
 
-| Option | Default | Description |
+The project API key and base URL are read from
+`~/.config/lmnr/claude-code-plugin.json` (written by `lmnr-cli plugin add
+claude-code`):
+
+```json
+{ "projectApiKey": "...", "baseUrl": "https://api.lmnr.ai" }
+```
+
+| Source | Default | Description |
 | --- | --- | --- |
-| `LMNR_PROJECT_API_KEY` | — (required) | Laminar project API key |
-| `LMNR_BASE_URL` | `https://api.lmnr.ai` | Laminar API base URL; for self-hosted use e.g. `http://localhost:8000` |
+| `~/.config/lmnr/claude-code-plugin.json` `projectApiKey` | — (required) | Laminar project API key |
+| `~/.config/lmnr/claude-code-plugin.json` `baseUrl` | `https://api.lmnr.ai` | Laminar API base URL; for self-hosted use e.g. `http://localhost:8000` |
 | `LMNR_USER_ID` | — | Optional user id attached to traces. If unset, the identity from `lmnr-cli login` (`~/.config/lmnr/credentials.json`) is used when present. |
 
-Options can be set in the plugin config or as plain environment variables. If
-you already have `LMNR_PROJECT_API_KEY` exported in your shell, the plugin picks
-it up automatically.
+The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
+file when set (handy for CI or a shell you already have configured).
 
 Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
 to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` caps per-field capture
