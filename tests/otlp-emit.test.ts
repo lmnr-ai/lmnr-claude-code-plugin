@@ -48,6 +48,34 @@ describe("OTLP format", () => {
     assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
   });
 
+  it("uses LMNR_PARENT_SPAN_CONTEXT as the parent for Claude Code turn roots", () => {
+    const parentTraceId = "12345678-1234-5678-9abc-def012345678";
+    const parentSpanId = "00000000-0000-0000-89ab-cdef01234567";
+    process.env.LMNR_PARENT_SPAN_CONTEXT = JSON.stringify({ traceId: parentTraceId, spanId: parentSpanId });
+    try {
+      const emitter = makeEmitter();
+      const turns = buildTurns([userRow("hello"), assistantRow([{ type: "text", text: "hi" }])]);
+      emitTurn(emitter, emitter.config, "0123abcd-0000-4000-8000-000000000000", 1, turns[0]!, "/tmp/session.jsonl");
+
+      const byName = spansByName(emitter.spans);
+      const root = byName["Claude Code - Turn 1 (0123abcd)"]!;
+      const llm = byName["LLM Call 1"]!;
+      assert.equal(root.spanContext().traceId, parentTraceId.replace(/-/g, ""));
+      assert.equal(root.parentSpanId, "89abcdef01234567");
+      assert.equal(llm.spanContext().traceId, root.spanContext().traceId);
+      assert.equal(llm.parentSpanId, root.spanContext().spanId);
+
+      const bytes = JsonTraceSerializer.serializeRequest(emitter.spans);
+      const payload = JSON.parse(Buffer.from(bytes!).toString("utf-8"));
+      const wireSpans = payload.resourceSpans[0].scopeSpans[0].spans;
+      const wireRoot = wireSpans.find((s: any) => s.name === "Claude Code - Turn 1 (0123abcd)");
+      assert.equal(wireRoot.traceId, parentTraceId.replace(/-/g, ""));
+      assert.equal(wireRoot.parentSpanId, "89abcdef01234567");
+    } finally {
+      delete process.env.LMNR_PARENT_SPAN_CONTEXT;
+    }
+  });
+
   it("wire-format envelope (camelCase, intValue string, arrayValue)", () => {
     const emitter = makeEmitter();
     const turns = buildTurns([
