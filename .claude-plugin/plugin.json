@@ -1,5 +1,5 @@
 {
-  "name": "laminar",
+  "name": "lmnr",
   "version": "0.1.0",
   "description": "Trace Claude Code sessions in Laminar: conversational turns, LLM calls, tool executions, and subagents.",
   "author": {

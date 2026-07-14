@@ -1,13 +1,13 @@
 {
-  "name": "laminar",
+  "name": "lmnr",
   "owner": {
     "name": "Laminar",
     "email": "founders@lmnr.ai",
-    "url": "https://www.lmnr.ai"
+    "url": "https://www.laminar.sh"
   },
   "plugins": [
     {
-      "name": "laminar",
+      "name": "lmnr",
       "source": "./",
       "description": "Trace Claude Code sessions in Laminar: conversational turns, LLM calls, tool executions, and subagents."
     }
