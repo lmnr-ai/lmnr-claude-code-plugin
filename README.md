@@ -29,6 +29,38 @@ Claude Code traces, mints a project API key, writes it to
 `~/.config/lmnr/claude-code-plugin.json`, and installs the plugin. No `npm
 install` is needed — the runtime bundle is committed to the plugin.
 
+### Manual installation
+
+If you'd rather not use `lmnr-cli`, wire the plugin up by hand: install it with
+Claude Code's own plugin commands, then create the config file yourself.
+
+1. Add the Laminar marketplace and install the plugin:
+
+   ```
+   claude plugin marketplace add lmnr-ai/lmnr-claude-code-plugin
+   claude plugin install laminar@laminar --scope user
+   ```
+
+2. Create `~/.config/lmnr/claude-code-plugin.json` with a project API key. Get
+   one from the Laminar dashboard under your project's settings → API keys
+   (create a dedicated key so it's clear it belongs to the plugin):
+
+   ```
+   mkdir -p ~/.config/lmnr
+   cat > ~/.config/lmnr/claude-code-plugin.json <<'EOF'
+   { "projectApiKey": "your-project-api-key", "baseUrl": "https://api.lmnr.ai" }
+   EOF
+   chmod 600 ~/.config/lmnr/claude-code-plugin.json
+   ```
+
+   `projectApiKey` is required; `baseUrl` is optional (defaults to
+   `https://api.lmnr.ai`; set it to your instance for self-hosted, e.g.
+   `http://localhost:8000`).
+
+3. **Quit Claude Code and open it in a new terminal window** so it loads the
+   plugin — relaunching in the same terminal can reuse the previous session and
+   skip the newly installed plugin.
+
 ## Configuration
 
 The project API key and base URL are read from
