@@ -60,7 +60,7 @@ claude-code`):
 | `~/.config/lmnr/claude-code-plugin.json` `projectApiKey` | — (required) | Laminar project API key |
 | `~/.config/lmnr/claude-code-plugin.json` `baseUrl` | `https://api.lmnr.ai` | Laminar API base URL; for self-hosted use e.g. `http://localhost:8000` |
 | `LMNR_USER_ID` | — | Optional user id attached to traces. If unset, the identity from `lmnr-cli login` (`~/.config/lmnr/credentials.json`) is used when present. |
-| `LMNR_PARENT_SPAN_CONTEXT` | — | Optional serialized Laminar span context (from `Laminar.serialize_span_context()` / SDK equivalent). When set, Claude Code turn root spans are emitted as children of that span so they join the caller's trace. |
+| `LMNR_SPAN_CONTEXT` | — | Optional serialized Laminar span context (from `Laminar.serialize_span_context()` / SDK equivalent). When set, Claude Code turn root spans are emitted as children of that span so they join the caller's trace. |
 
 The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
 file when set (handy for CI or a shell you already have configured).

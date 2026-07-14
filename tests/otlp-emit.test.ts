@@ -48,10 +48,10 @@ describe("OTLP format", () => {
     assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
   });
 
-  it("uses LMNR_PARENT_SPAN_CONTEXT as the parent for Claude Code turn roots", () => {
+  it("uses LMNR_SPAN_CONTEXT as the parent for Claude Code turn roots", () => {
     const parentTraceId = "12345678-1234-5678-9abc-def012345678";
     const parentSpanId = "00000000-0000-0000-89ab-cdef01234567";
-    process.env.LMNR_PARENT_SPAN_CONTEXT = JSON.stringify({ traceId: parentTraceId, spanId: parentSpanId });
+    process.env.LMNR_SPAN_CONTEXT = JSON.stringify({ traceId: parentTraceId, spanId: parentSpanId });
     try {
       const emitter = makeEmitter();
       const turns = buildTurns([userRow("hello"), assistantRow([{ type: "text", text: "hi" }])]);
@@ -72,7 +72,7 @@ describe("OTLP format", () => {
       assert.equal(wireRoot.traceId, parentTraceId.replace(/-/g, ""));
       assert.equal(wireRoot.parentSpanId, "89abcdef01234567");
     } finally {
-      delete process.env.LMNR_PARENT_SPAN_CONTEXT;
+      delete process.env.LMNR_SPAN_CONTEXT;
     }
   });
 
