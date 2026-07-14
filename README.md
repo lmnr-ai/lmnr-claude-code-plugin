@@ -2,26 +2,10 @@
 
 Trace your [Claude Code](https://claude.com/claude-code) sessions in [Laminar](https://www.lmnr.ai).
 
-Every conversational turn becomes a Laminar trace with:
-
-- a root span carrying the user prompt and the final assistant response,
-- one LLM span per assistant message, with model name and token usage (input, output, cache read/write),
-- one tool span per tool execution, with tool input and result,
-- subagent (Task/Agent tool) transcripts nested under their launching tool span,
-- session grouping — all turns of one Claude Code session share a Laminar session id.
-
-The plugin runs on the `Stop` and `SessionEnd` hooks, reads the session transcript
-incrementally, and ships spans to Laminar over OTLP/HTTP/JSON using the
-OpenTelemetry SDK. It is written in TypeScript and ships as a single
-dependency-free JavaScript bundle (`dist/hook.cjs`), run on Node — which Claude
-Code already requires — so there is nothing to install after adding the plugin. It
-fails open: if Laminar is unreachable or anything goes wrong, Claude Code is never
-blocked or slowed down by more than a few seconds.
-
 ## Installation
 
 ```
-lmnr-cli plugin add claude-code
+npx lmnr-cli plugin add claude-code
 ```
 
 This logs you in, lets you pick the Laminar project that should receive your
