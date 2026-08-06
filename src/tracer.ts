@@ -125,6 +125,13 @@ class CollectingSpanProcessor implements SpanProcessor {
  */
 export class TraceEmitter {
   readonly config: LaminarConfig;
+  /**
+   * Session the spans being minted belong to. Set once per turn before any span
+   * is created, so `startSpan` can stamp session/user association on EVERY span
+   * rather than only the trace root — span-level queries and filters in Laminar
+   * read these off the span, not off the trace.
+   */
+  sessionId: string | null = null;
   private readonly processor: CollectingSpanProcessor;
   private readonly tracer;
   private readonly rootParentContext: Context;
@@ -212,6 +219,16 @@ export function startSpan(emitter: TraceEmitter, args: StartSpanArgs): SpanHandl
   const attrs: Record<string, Json> = { [SPAN_TYPE_ATTR]: args.spanType ?? "DEFAULT" };
   if (args.inputValue !== undefined && args.inputValue !== null) {
     attrs[SPAN_INPUT_ATTR] = jsonDumps(args.inputValue);
+  }
+  // Session and user ride EVERY span, not just the root. Both are constant for
+  // the whole turn, so unlike per-span metadata (see buildToolMetadataAttributes)
+  // they cannot pollute or race on the trace-level association. Without them a
+  // span-level query — "LLM spans for session X" — matches nothing.
+  if (emitter.sessionId) {
+    attrs[`${ASSOC_PREFIX}.session_id`] = emitter.sessionId;
+  }
+  if (emitter.config.userId) {
+    attrs[`${ASSOC_PREFIX}.user_id`] = emitter.config.userId;
   }
   if (args.attributes) {
     Object.assign(attrs, args.attributes);

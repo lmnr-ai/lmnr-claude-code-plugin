@@ -265,6 +265,30 @@ describe("emitTurn", () => {
     return emitter;
   };
 
+  it("stamps session and user association on every span, not just the root", () => {
+    const emitter = emit([
+      userRow("hello"),
+      assistantRow([{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }]),
+      toolResultRow("t1", "a.txt"),
+      assistantRow([{ type: "text", text: "done" }]),
+    ]);
+    const sessionId = "0123abcd-0000-4000-8000-000000000000";
+
+    // Span-level queries in Laminar read association off the span itself, so a
+    // root-only stamp makes "LLM spans for session X" match nothing.
+    assert.ok(emitter.spans.length >= 3, `expected several spans, got ${emitter.spans.length}`);
+    for (const span of emitter.spans) {
+      const a = attrs(span);
+      assert.equal(
+        a["lmnr.association.properties.session_id"],
+        sessionId,
+        `${span.name} (${a["lmnr.span.type"]}) carries the session id`
+      );
+    }
+    const types = new Set(emitter.spans.map((s) => attrs(s)["lmnr.span.type"]));
+    assert.ok(types.has("LLM") && types.has("TOOL"), `covers LLM and TOOL spans, saw ${[...types].join(",")}`);
+  });
+
   it("simple turn spans", () => {
     const emitter = emit([userRow("hello"), assistantRow([{ type: "text", text: "hi" }])]);
     const names = spansByName(emitter.spans);

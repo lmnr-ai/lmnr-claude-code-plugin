@@ -530,6 +530,8 @@ export function emitTurn(
   transcriptPath: string,
   subagentMap: Record<string, SubagentTranscript> | null = null
 ): void {
+  // Every span minted below inherits session/user association from the emitter.
+  emitter.sessionId = sessionId;
   const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
 
   const lastAssistant = turn.assistantMsgs[turn.assistantMsgs.length - 1]!;
