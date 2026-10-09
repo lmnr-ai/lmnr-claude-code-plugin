@@ -123,6 +123,26 @@ function getToolResultForObservation(toolResultEntry: ToolResultEntry | null | u
   return { output, resultTimestamp, finalOutput, finalResultTimestamp };
 }
 
+/**
+ * The subagent's final report: its last message's text or, for a background
+ * subagent that hands its report back through a SubagentHandback tool call
+ * instead, that call's `message`.
+ */
+function getSubagentReport(lastAssistant: Row | undefined): string {
+  const content = lastAssistant ? getContentFromRow(lastAssistant) : "";
+  const text = extractTextFromContent(content);
+  if (text) {
+    return text;
+  }
+  for (const toolUse of getToolUseBlocks(content)) {
+    const message = toolUse.input?.message;
+    if (toolUse.name === "SubagentHandback" && typeof message === "string") {
+      return message;
+    }
+  }
+  return "";
+}
+
 function getShortTranscriptPathForMetadata(p: unknown): string | null {
   if (typeof p === "string" && p) {
     // Return the basename, mirroring Path(path).name.
@@ -339,7 +359,7 @@ function emitSubagentObservations(
 
   const lastTurn = turns[turns.length - 1]!;
   const lastAssistant = lastTurn.assistantMsgs[lastTurn.assistantMsgs.length - 1];
-  const [subagentOutputText] = truncateText(extractTextFromContent(lastAssistant ? getContentFromRow(lastAssistant) : ""));
+  const [subagentOutputText] = truncateText(getSubagentReport(lastAssistant));
 
   const description = subagent.description;
   const subagentName = typeof description === "string" && description ? `Subagent: ${description}` : "Subagent";

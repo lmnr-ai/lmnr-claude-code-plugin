@@ -25,7 +25,13 @@ import {
 } from "./state.js";
 import { getSubagentTranscriptsByToolUseId, type SubagentTranscript } from "./subagents.js";
 import { exportWithTimeout, TraceEmitter } from "./tracer.js";
-import { getUserOrAssistantRoleFromRow, isToolResult, readNewJsonl } from "./transcript.js";
+import {
+  extractTextFromContent,
+  getContentFromRow,
+  getUserOrAssistantRoleFromRow,
+  isToolResult,
+  readNewJsonl,
+} from "./transcript.js";
 import { buildTurns, type Turn } from "./turns.js";
 import type { Row } from "./types.js";
 
@@ -57,11 +63,16 @@ export function emitReadyTurns(
 }
 
 /**
- * Split off an incomplete trailing turn — a user prompt not yet followed by any
- * assistant row — so it is held for the next run instead of dropped. Returns
- * [rowsToProcessNow, rowsToHold].
+ * Split off an incomplete trailing turn so it is held for the next run instead
+ * of emitted without its ending. A trailing turn is incomplete when its user
+ * prompt has no assistant row yet, when its last chat row is a tool_result (the
+ * assistant's reply to it isn't written yet), or when none of its assistant
+ * rows carries the end of `finalAssistantText` — the text the Stop payload says
+ * the turn ended with. Claude Code fires Stop before it writes that final row,
+ * and in interactive sessions often only after the hook exits, so waiting for
+ * it inside the hook doesn't help. Returns [rowsToProcessNow, rowsToHold].
  */
-function splitTrailingIncompleteTurn(rows: Row[]): [Row[], Row[]] {
+function splitTrailingIncompleteTurn(rows: Row[], finalAssistantText = ""): [Row[], Row[]] {
   let lastUserIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
@@ -76,18 +87,38 @@ function splitTrailingIncompleteTurn(rows: Row[]): [Row[], Row[]] {
     return [rows, []];
   }
   const tail = rows.slice(lastUserIdx);
-  const tailHasAssistant = tail.some((r) => getUserOrAssistantRoleFromRow(r) === "assistant");
-  if (tailHasAssistant) {
-    return [rows, []];
+  const hold: [Row[], Row[]] = [rows.slice(0, lastUserIdx), tail];
+  const assistantRows: Row[] = [];
+  for (const row of tail) {
+    if (isToolResult(row)) {
+      assistantRows.length = 0; // only replies written after the last tool_result count
+    } else if (getUserOrAssistantRoleFromRow(row) === "assistant") {
+      assistantRows.push(row);
+    }
   }
-  return [rows.slice(0, lastUserIdx), tail];
+  if (assistantRows.length === 0) {
+    return hold;
+  }
+  // The final message can span several rows; its last text row ends the text.
+  const want = finalAssistantText.trim();
+  if (
+    want &&
+    !assistantRows.some((row) => {
+      const text = extractTextFromContent(getContentFromRow(row)).trim();
+      return text !== "" && want.endsWith(text);
+    })
+  ) {
+    return hold;
+  }
+  return [rows, []];
 }
 
 export function getNewTurnsFromTranscript(
   transcriptPath: string,
   sessionState: SessionState,
   subagentMap?: Record<string, SubagentTranscript>,
-  flushDeferredAgentTurns = false
+  flushDeferredAgentTurns = false,
+  finalAssistantText = ""
 ): [Turn[], SessionState] {
   let rows: Row[];
   // At SessionEnd no more transcript bytes are coming, so a buffered final
@@ -107,7 +138,7 @@ export function getNewTurnsFromTranscript(
   // Hold back an incomplete trailing turn (except at SessionEnd, which flushes
   // everything) so its user row is re-read with the assistant response next run.
   if (!flushDeferredAgentTurns) {
-    const [keep, hold] = splitTrailingIncompleteTurn(remainingRows);
+    const [keep, hold] = splitTrailingIncompleteTurn(remainingRows, finalAssistantText);
     sessionState.pendingTurnRows = hold;
     remainingRows = keep;
   }
@@ -141,6 +172,8 @@ export function getNewTurnsFromTranscript(
 
 export interface EmitNewTurnsOptions {
   flushDeferredAgentTurns?: boolean;
+  // Stop payload's last_assistant_message: the text the turn ended with.
+  finalAssistantText?: string;
   exportFn?: (emitter: TraceEmitter) => Promise<boolean>;
 }
 
@@ -165,7 +198,13 @@ export async function emitNewTurnsFromTranscript(
     }
 
     let turns: Turn[];
-    [turns, sessionState] = getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns);
+    [turns, sessionState] = getNewTurnsFromTranscript(
+      transcriptPath,
+      sessionState,
+      subagentMap,
+      flushDeferredAgentTurns,
+      opts.finalAssistantText ?? ""
+    );
     if (turns.length === 0) {
       saveSessionState(state, key, sessionState);
       return 0;
