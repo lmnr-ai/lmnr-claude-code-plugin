@@ -18437,9 +18437,9 @@ var require_getMachineId_linux = __commonJS({
     var api_1 = (init_esm(), __toCommonJS(esm_exports));
     async function getMachineId() {
       const paths = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
-      for (const path4 of paths) {
+      for (const path5 of paths) {
         try {
-          const result = await fs_1.promises.readFile(path4, { encoding: "utf8" });
+          const result = await fs_1.promises.readFile(path5, { encoding: "utf8" });
           return result.trim();
         } catch (e) {
           api_1.diag.debug(`error reading machine id: ${e}`);
@@ -21832,7 +21832,7 @@ function appendRootPathToUrlIfNeeded(url) {
     return void 0;
   }
 }
-function appendResourcePathToUrl(url, path4) {
+function appendResourcePathToUrl(url, path5) {
   try {
     new URL(url);
   } catch (_a) {
@@ -21842,11 +21842,11 @@ function appendResourcePathToUrl(url, path4) {
   if (!url.endsWith("/")) {
     url = url + "/";
   }
-  url += path4;
+  url += path5;
   try {
     new URL(url);
   } catch (_b) {
-    diag2.warn("Configuration: Provided URL appended with '" + path4 + "' is not a valid URL, using 'undefined' instead of '" + url + "'");
+    diag2.warn("Configuration: Provided URL appended with '" + path5 + "' is not a valid URL, using 'undefined' instead of '" + url + "'");
     return void 0;
   }
   return url;
@@ -23445,54 +23445,54 @@ var require_polyfills = __commonJS({
     }
     var chdir;
     module2.exports = patch;
-    function patch(fs7) {
+    function patch(fs8) {
       if (constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
-        patchLchmod(fs7);
+        patchLchmod(fs8);
       }
-      if (!fs7.lutimes) {
-        patchLutimes(fs7);
+      if (!fs8.lutimes) {
+        patchLutimes(fs8);
       }
-      fs7.chown = chownFix(fs7.chown);
-      fs7.fchown = chownFix(fs7.fchown);
-      fs7.lchown = chownFix(fs7.lchown);
-      fs7.chmod = chmodFix(fs7.chmod);
-      fs7.fchmod = chmodFix(fs7.fchmod);
-      fs7.lchmod = chmodFix(fs7.lchmod);
-      fs7.chownSync = chownFixSync(fs7.chownSync);
-      fs7.fchownSync = chownFixSync(fs7.fchownSync);
-      fs7.lchownSync = chownFixSync(fs7.lchownSync);
-      fs7.chmodSync = chmodFixSync(fs7.chmodSync);
-      fs7.fchmodSync = chmodFixSync(fs7.fchmodSync);
-      fs7.lchmodSync = chmodFixSync(fs7.lchmodSync);
-      fs7.stat = statFix(fs7.stat);
-      fs7.fstat = statFix(fs7.fstat);
-      fs7.lstat = statFix(fs7.lstat);
-      fs7.statSync = statFixSync(fs7.statSync);
-      fs7.fstatSync = statFixSync(fs7.fstatSync);
-      fs7.lstatSync = statFixSync(fs7.lstatSync);
-      if (fs7.chmod && !fs7.lchmod) {
-        fs7.lchmod = function(path4, mode, cb) {
+      fs8.chown = chownFix(fs8.chown);
+      fs8.fchown = chownFix(fs8.fchown);
+      fs8.lchown = chownFix(fs8.lchown);
+      fs8.chmod = chmodFix(fs8.chmod);
+      fs8.fchmod = chmodFix(fs8.fchmod);
+      fs8.lchmod = chmodFix(fs8.lchmod);
+      fs8.chownSync = chownFixSync(fs8.chownSync);
+      fs8.fchownSync = chownFixSync(fs8.fchownSync);
+      fs8.lchownSync = chownFixSync(fs8.lchownSync);
+      fs8.chmodSync = chmodFixSync(fs8.chmodSync);
+      fs8.fchmodSync = chmodFixSync(fs8.fchmodSync);
+      fs8.lchmodSync = chmodFixSync(fs8.lchmodSync);
+      fs8.stat = statFix(fs8.stat);
+      fs8.fstat = statFix(fs8.fstat);
+      fs8.lstat = statFix(fs8.lstat);
+      fs8.statSync = statFixSync(fs8.statSync);
+      fs8.fstatSync = statFixSync(fs8.fstatSync);
+      fs8.lstatSync = statFixSync(fs8.lstatSync);
+      if (fs8.chmod && !fs8.lchmod) {
+        fs8.lchmod = function(path5, mode, cb) {
           if (cb) process.nextTick(cb);
         };
-        fs7.lchmodSync = function() {
+        fs8.lchmodSync = function() {
         };
       }
-      if (fs7.chown && !fs7.lchown) {
-        fs7.lchown = function(path4, uid, gid, cb) {
+      if (fs8.chown && !fs8.lchown) {
+        fs8.lchown = function(path5, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
-        fs7.lchownSync = function() {
+        fs8.lchownSync = function() {
         };
       }
       if (platform === "win32") {
-        fs7.rename = typeof fs7.rename !== "function" ? fs7.rename : function(fs$rename) {
+        fs8.rename = typeof fs8.rename !== "function" ? fs8.rename : function(fs$rename) {
           function rename(from, to, cb) {
             var start = Date.now();
             var backoff = 0;
             fs$rename(from, to, function CB(er) {
               if (er && (er.code === "EACCES" || er.code === "EPERM" || er.code === "EBUSY") && Date.now() - start < 6e4) {
                 setTimeout(function() {
-                  fs7.stat(to, function(stater, st) {
+                  fs8.stat(to, function(stater, st) {
                     if (stater && stater.code === "ENOENT")
                       fs$rename(from, to, CB);
                     else
@@ -23508,9 +23508,9 @@ var require_polyfills = __commonJS({
           }
           if (Object.setPrototypeOf) Object.setPrototypeOf(rename, fs$rename);
           return rename;
-        }(fs7.rename);
+        }(fs8.rename);
       }
-      fs7.read = typeof fs7.read !== "function" ? fs7.read : function(fs$read) {
+      fs8.read = typeof fs8.read !== "function" ? fs8.read : function(fs$read) {
         function read(fd, buffer, offset, length, position, callback_) {
           var callback;
           if (callback_ && typeof callback_ === "function") {
@@ -23518,22 +23518,22 @@ var require_polyfills = __commonJS({
             callback = function(er, _, __) {
               if (er && er.code === "EAGAIN" && eagCounter < 10) {
                 eagCounter++;
-                return fs$read.call(fs7, fd, buffer, offset, length, position, callback);
+                return fs$read.call(fs8, fd, buffer, offset, length, position, callback);
               }
               callback_.apply(this, arguments);
             };
           }
-          return fs$read.call(fs7, fd, buffer, offset, length, position, callback);
+          return fs$read.call(fs8, fd, buffer, offset, length, position, callback);
         }
         if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read);
         return read;
-      }(fs7.read);
-      fs7.readSync = typeof fs7.readSync !== "function" ? fs7.readSync : /* @__PURE__ */ function(fs$readSync) {
+      }(fs8.read);
+      fs8.readSync = typeof fs8.readSync !== "function" ? fs8.readSync : /* @__PURE__ */ function(fs$readSync) {
         return function(fd, buffer, offset, length, position) {
           var eagCounter = 0;
           while (true) {
             try {
-              return fs$readSync.call(fs7, fd, buffer, offset, length, position);
+              return fs$readSync.call(fs8, fd, buffer, offset, length, position);
             } catch (er) {
               if (er.code === "EAGAIN" && eagCounter < 10) {
                 eagCounter++;
@@ -23543,11 +23543,11 @@ var require_polyfills = __commonJS({
             }
           }
         };
-      }(fs7.readSync);
-      function patchLchmod(fs8) {
-        fs8.lchmod = function(path4, mode, callback) {
-          fs8.open(
-            path4,
+      }(fs8.readSync);
+      function patchLchmod(fs9) {
+        fs9.lchmod = function(path5, mode, callback) {
+          fs9.open(
+            path5,
             constants.O_WRONLY | constants.O_SYMLINK,
             mode,
             function(err, fd) {
@@ -23555,80 +23555,80 @@ var require_polyfills = __commonJS({
                 if (callback) callback(err);
                 return;
               }
-              fs8.fchmod(fd, mode, function(err2) {
-                fs8.close(fd, function(err22) {
+              fs9.fchmod(fd, mode, function(err2) {
+                fs9.close(fd, function(err22) {
                   if (callback) callback(err2 || err22);
                 });
               });
             }
           );
         };
-        fs8.lchmodSync = function(path4, mode) {
-          var fd = fs8.openSync(path4, constants.O_WRONLY | constants.O_SYMLINK, mode);
+        fs9.lchmodSync = function(path5, mode) {
+          var fd = fs9.openSync(path5, constants.O_WRONLY | constants.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
-            ret = fs8.fchmodSync(fd, mode);
+            ret = fs9.fchmodSync(fd, mode);
             threw = false;
           } finally {
             if (threw) {
               try {
-                fs8.closeSync(fd);
+                fs9.closeSync(fd);
               } catch (er) {
               }
             } else {
-              fs8.closeSync(fd);
+              fs9.closeSync(fd);
             }
           }
           return ret;
         };
       }
-      function patchLutimes(fs8) {
-        if (constants.hasOwnProperty("O_SYMLINK") && fs8.futimes) {
-          fs8.lutimes = function(path4, at, mt, cb) {
-            fs8.open(path4, constants.O_SYMLINK, function(er, fd) {
+      function patchLutimes(fs9) {
+        if (constants.hasOwnProperty("O_SYMLINK") && fs9.futimes) {
+          fs9.lutimes = function(path5, at, mt, cb) {
+            fs9.open(path5, constants.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
               }
-              fs8.futimes(fd, at, mt, function(er2) {
-                fs8.close(fd, function(er22) {
+              fs9.futimes(fd, at, mt, function(er2) {
+                fs9.close(fd, function(er22) {
                   if (cb) cb(er2 || er22);
                 });
               });
             });
           };
-          fs8.lutimesSync = function(path4, at, mt) {
-            var fd = fs8.openSync(path4, constants.O_SYMLINK);
+          fs9.lutimesSync = function(path5, at, mt) {
+            var fd = fs9.openSync(path5, constants.O_SYMLINK);
             var ret;
             var threw = true;
             try {
-              ret = fs8.futimesSync(fd, at, mt);
+              ret = fs9.futimesSync(fd, at, mt);
               threw = false;
             } finally {
               if (threw) {
                 try {
-                  fs8.closeSync(fd);
+                  fs9.closeSync(fd);
                 } catch (er) {
                 }
               } else {
-                fs8.closeSync(fd);
+                fs9.closeSync(fd);
               }
             }
             return ret;
           };
-        } else if (fs8.futimes) {
-          fs8.lutimes = function(_a, _b, _c, cb) {
+        } else if (fs9.futimes) {
+          fs9.lutimes = function(_a, _b, _c, cb) {
             if (cb) process.nextTick(cb);
           };
-          fs8.lutimesSync = function() {
+          fs9.lutimesSync = function() {
           };
         }
       }
       function chmodFix(orig) {
         if (!orig) return orig;
         return function(target, mode, cb) {
-          return orig.call(fs7, target, mode, function(er) {
+          return orig.call(fs8, target, mode, function(er) {
             if (chownErOk(er)) er = null;
             if (cb) cb.apply(this, arguments);
           });
@@ -23638,7 +23638,7 @@ var require_polyfills = __commonJS({
         if (!orig) return orig;
         return function(target, mode) {
           try {
-            return orig.call(fs7, target, mode);
+            return orig.call(fs8, target, mode);
           } catch (er) {
             if (!chownErOk(er)) throw er;
           }
@@ -23647,7 +23647,7 @@ var require_polyfills = __commonJS({
       function chownFix(orig) {
         if (!orig) return orig;
         return function(target, uid, gid, cb) {
-          return orig.call(fs7, target, uid, gid, function(er) {
+          return orig.call(fs8, target, uid, gid, function(er) {
             if (chownErOk(er)) er = null;
             if (cb) cb.apply(this, arguments);
           });
@@ -23657,7 +23657,7 @@ var require_polyfills = __commonJS({
         if (!orig) return orig;
         return function(target, uid, gid) {
           try {
-            return orig.call(fs7, target, uid, gid);
+            return orig.call(fs8, target, uid, gid);
           } catch (er) {
             if (!chownErOk(er)) throw er;
           }
@@ -23677,13 +23677,13 @@ var require_polyfills = __commonJS({
             }
             if (cb) cb.apply(this, arguments);
           }
-          return options ? orig.call(fs7, target, options, callback) : orig.call(fs7, target, callback);
+          return options ? orig.call(fs8, target, options, callback) : orig.call(fs8, target, callback);
         };
       }
       function statFixSync(orig) {
         if (!orig) return orig;
         return function(target, options) {
-          var stats = options ? orig.call(fs7, target, options) : orig.call(fs7, target);
+          var stats = options ? orig.call(fs8, target, options) : orig.call(fs8, target);
           if (stats) {
             if (stats.uid < 0) stats.uid += 4294967296;
             if (stats.gid < 0) stats.gid += 4294967296;
@@ -23712,16 +23712,16 @@ var require_legacy_streams = __commonJS({
   "node_modules/graceful-fs/legacy-streams.js"(exports2, module2) {
     var Stream = require("stream").Stream;
     module2.exports = legacy;
-    function legacy(fs7) {
+    function legacy(fs8) {
       return {
         ReadStream,
         WriteStream
       };
-      function ReadStream(path4, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path4, options);
+      function ReadStream(path5, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path5, options);
         Stream.call(this);
         var self2 = this;
-        this.path = path4;
+        this.path = path5;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -23755,7 +23755,7 @@ var require_legacy_streams = __commonJS({
           });
           return;
         }
-        fs7.open(this.path, this.flags, this.mode, function(err, fd) {
+        fs8.open(this.path, this.flags, this.mode, function(err, fd) {
           if (err) {
             self2.emit("error", err);
             self2.readable = false;
@@ -23766,10 +23766,10 @@ var require_legacy_streams = __commonJS({
           self2._read();
         });
       }
-      function WriteStream(path4, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path4, options);
+      function WriteStream(path5, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path5, options);
         Stream.call(this);
-        this.path = path4;
+        this.path = path5;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -23794,7 +23794,7 @@ var require_legacy_streams = __commonJS({
         this.busy = false;
         this._queue = [];
         if (this.fd === null) {
-          this._open = fs7.open;
+          this._open = fs8.open;
           this._queue.push([this._open, this.path, this.flags, this.mode, void 0]);
           this.flush();
         }
@@ -23829,7 +23829,7 @@ var require_clone = __commonJS({
 // node_modules/graceful-fs/graceful-fs.js
 var require_graceful_fs = __commonJS({
   "node_modules/graceful-fs/graceful-fs.js"(exports2, module2) {
-    var fs7 = require("fs");
+    var fs8 = require("fs");
     var polyfills = require_polyfills();
     var legacy = require_legacy_streams();
     var clone = require_clone();
@@ -23861,12 +23861,12 @@ var require_graceful_fs = __commonJS({
         m = "GFS4: " + m.split(/\n/).join("\nGFS4: ");
         console.error(m);
       };
-    if (!fs7[gracefulQueue]) {
+    if (!fs8[gracefulQueue]) {
       queue = global[gracefulQueue] || [];
-      publishQueue(fs7, queue);
-      fs7.close = function(fs$close) {
+      publishQueue(fs8, queue);
+      fs8.close = function(fs$close) {
         function close(fd, cb) {
-          return fs$close.call(fs7, fd, function(err) {
+          return fs$close.call(fs8, fd, function(err) {
             if (!err) {
               resetQueue();
             }
@@ -23878,48 +23878,48 @@ var require_graceful_fs = __commonJS({
           value: fs$close
         });
         return close;
-      }(fs7.close);
-      fs7.closeSync = function(fs$closeSync) {
+      }(fs8.close);
+      fs8.closeSync = function(fs$closeSync) {
         function closeSync3(fd) {
-          fs$closeSync.apply(fs7, arguments);
+          fs$closeSync.apply(fs8, arguments);
           resetQueue();
         }
         Object.defineProperty(closeSync3, previousSymbol, {
           value: fs$closeSync
         });
         return closeSync3;
-      }(fs7.closeSync);
+      }(fs8.closeSync);
       if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || "")) {
         process.on("exit", function() {
-          debug2(fs7[gracefulQueue]);
-          require("assert").equal(fs7[gracefulQueue].length, 0);
+          debug2(fs8[gracefulQueue]);
+          require("assert").equal(fs8[gracefulQueue].length, 0);
         });
       }
     }
     var queue;
     if (!global[gracefulQueue]) {
-      publishQueue(global, fs7[gracefulQueue]);
+      publishQueue(global, fs8[gracefulQueue]);
     }
-    module2.exports = patch(clone(fs7));
-    if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs7.__patched) {
-      module2.exports = patch(fs7);
-      fs7.__patched = true;
+    module2.exports = patch(clone(fs8));
+    if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs8.__patched) {
+      module2.exports = patch(fs8);
+      fs8.__patched = true;
     }
-    function patch(fs8) {
-      polyfills(fs8);
-      fs8.gracefulify = patch;
-      fs8.createReadStream = createReadStream;
-      fs8.createWriteStream = createWriteStream;
-      var fs$readFile = fs8.readFile;
-      fs8.readFile = readFile;
-      function readFile(path4, options, cb) {
+    function patch(fs9) {
+      polyfills(fs9);
+      fs9.gracefulify = patch;
+      fs9.createReadStream = createReadStream;
+      fs9.createWriteStream = createWriteStream;
+      var fs$readFile = fs9.readFile;
+      fs9.readFile = readFile;
+      function readFile(path5, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path4, options, cb);
-        function go$readFile(path5, options2, cb2, startTime) {
-          return fs$readFile(path5, options2, function(err) {
+        return go$readFile(path5, options, cb);
+        function go$readFile(path6, options2, cb2, startTime) {
+          return fs$readFile(path6, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$readFile, [path5, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path6, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -23927,16 +23927,16 @@ var require_graceful_fs = __commonJS({
           });
         }
       }
-      var fs$writeFile = fs8.writeFile;
-      fs8.writeFile = writeFile;
-      function writeFile(path4, data, options, cb) {
+      var fs$writeFile = fs9.writeFile;
+      fs9.writeFile = writeFile;
+      function writeFile(path5, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path4, data, options, cb);
-        function go$writeFile(path5, data2, options2, cb2, startTime) {
-          return fs$writeFile(path5, data2, options2, function(err) {
+        return go$writeFile(path5, data, options, cb);
+        function go$writeFile(path6, data2, options2, cb2, startTime) {
+          return fs$writeFile(path6, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$writeFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path6, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -23944,17 +23944,17 @@ var require_graceful_fs = __commonJS({
           });
         }
       }
-      var fs$appendFile = fs8.appendFile;
+      var fs$appendFile = fs9.appendFile;
       if (fs$appendFile)
-        fs8.appendFile = appendFile;
-      function appendFile(path4, data, options, cb) {
+        fs9.appendFile = appendFile;
+      function appendFile(path5, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path4, data, options, cb);
-        function go$appendFile(path5, data2, options2, cb2, startTime) {
-          return fs$appendFile(path5, data2, options2, function(err) {
+        return go$appendFile(path5, data, options, cb);
+        function go$appendFile(path6, data2, options2, cb2, startTime) {
+          return fs$appendFile(path6, data2, options2, function(err) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$appendFile, [path5, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path6, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -23962,9 +23962,9 @@ var require_graceful_fs = __commonJS({
           });
         }
       }
-      var fs$copyFile = fs8.copyFile;
+      var fs$copyFile = fs9.copyFile;
       if (fs$copyFile)
-        fs8.copyFile = copyFile;
+        fs9.copyFile = copyFile;
       function copyFile(src, dest, flags, cb) {
         if (typeof flags === "function") {
           cb = flags;
@@ -23982,34 +23982,34 @@ var require_graceful_fs = __commonJS({
           });
         }
       }
-      var fs$readdir = fs8.readdir;
-      fs8.readdir = readdir;
+      var fs$readdir = fs9.readdir;
+      fs9.readdir = readdir;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir(path4, options, cb) {
+      function readdir(path5, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path5, options2, cb2, startTime) {
-          return fs$readdir(path5, fs$readdirCallback(
-            path5,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path6, options2, cb2, startTime) {
+          return fs$readdir(path6, fs$readdirCallback(
+            path6,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path5, options2, cb2, startTime) {
-          return fs$readdir(path5, options2, fs$readdirCallback(
-            path5,
+        } : function go$readdir2(path6, options2, cb2, startTime) {
+          return fs$readdir(path6, options2, fs$readdirCallback(
+            path6,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path4, options, cb);
-        function fs$readdirCallback(path5, options2, cb2, startTime) {
+        return go$readdir(path5, options, cb);
+        function fs$readdirCallback(path6, options2, cb2, startTime) {
           return function(err, files) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path5, options2, cb2],
+                [path6, options2, cb2],
                 err,
                 startTime || Date.now(),
                 Date.now()
@@ -24024,21 +24024,21 @@ var require_graceful_fs = __commonJS({
         }
       }
       if (process.version.substr(0, 4) === "v0.8") {
-        var legStreams = legacy(fs8);
+        var legStreams = legacy(fs9);
         ReadStream = legStreams.ReadStream;
         WriteStream = legStreams.WriteStream;
       }
-      var fs$ReadStream = fs8.ReadStream;
+      var fs$ReadStream = fs9.ReadStream;
       if (fs$ReadStream) {
         ReadStream.prototype = Object.create(fs$ReadStream.prototype);
         ReadStream.prototype.open = ReadStream$open;
       }
-      var fs$WriteStream = fs8.WriteStream;
+      var fs$WriteStream = fs9.WriteStream;
       if (fs$WriteStream) {
         WriteStream.prototype = Object.create(fs$WriteStream.prototype);
         WriteStream.prototype.open = WriteStream$open;
       }
-      Object.defineProperty(fs8, "ReadStream", {
+      Object.defineProperty(fs9, "ReadStream", {
         get: function() {
           return ReadStream;
         },
@@ -24048,7 +24048,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      Object.defineProperty(fs8, "WriteStream", {
+      Object.defineProperty(fs9, "WriteStream", {
         get: function() {
           return WriteStream;
         },
@@ -24059,7 +24059,7 @@ var require_graceful_fs = __commonJS({
         configurable: true
       });
       var FileReadStream = ReadStream;
-      Object.defineProperty(fs8, "FileReadStream", {
+      Object.defineProperty(fs9, "FileReadStream", {
         get: function() {
           return FileReadStream;
         },
@@ -24070,7 +24070,7 @@ var require_graceful_fs = __commonJS({
         configurable: true
       });
       var FileWriteStream = WriteStream;
-      Object.defineProperty(fs8, "FileWriteStream", {
+      Object.defineProperty(fs9, "FileWriteStream", {
         get: function() {
           return FileWriteStream;
         },
@@ -24080,7 +24080,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path4, options) {
+      function ReadStream(path5, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -24100,7 +24100,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path4, options) {
+      function WriteStream(path5, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -24118,22 +24118,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path4, options) {
-        return new fs8.ReadStream(path4, options);
+      function createReadStream(path5, options) {
+        return new fs9.ReadStream(path5, options);
       }
-      function createWriteStream(path4, options) {
-        return new fs8.WriteStream(path4, options);
+      function createWriteStream(path5, options) {
+        return new fs9.WriteStream(path5, options);
       }
-      var fs$open = fs8.open;
-      fs8.open = open;
-      function open(path4, flags, mode, cb) {
+      var fs$open = fs9.open;
+      fs9.open = open;
+      function open(path5, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path4, flags, mode, cb);
-        function go$open(path5, flags2, mode2, cb2, startTime) {
-          return fs$open(path5, flags2, mode2, function(err, fd) {
+        return go$open(path5, flags, mode, cb);
+        function go$open(path6, flags2, mode2, cb2, startTime) {
+          return fs$open(path6, flags2, mode2, function(err, fd) {
             if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
-              enqueue([go$open, [path5, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path6, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -24141,20 +24141,20 @@ var require_graceful_fs = __commonJS({
           });
         }
       }
-      return fs8;
+      return fs9;
     }
     function enqueue(elem) {
       debug2("ENQUEUE", elem[0].name, elem[1]);
-      fs7[gracefulQueue].push(elem);
+      fs8[gracefulQueue].push(elem);
       retry();
     }
     var retryTimer;
     function resetQueue() {
       var now = Date.now();
-      for (var i = 0; i < fs7[gracefulQueue].length; ++i) {
-        if (fs7[gracefulQueue][i].length > 2) {
-          fs7[gracefulQueue][i][3] = now;
-          fs7[gracefulQueue][i][4] = now;
+      for (var i = 0; i < fs8[gracefulQueue].length; ++i) {
+        if (fs8[gracefulQueue][i].length > 2) {
+          fs8[gracefulQueue][i][3] = now;
+          fs8[gracefulQueue][i][4] = now;
         }
       }
       retry();
@@ -24162,9 +24162,9 @@ var require_graceful_fs = __commonJS({
     function retry() {
       clearTimeout(retryTimer);
       retryTimer = void 0;
-      if (fs7[gracefulQueue].length === 0)
+      if (fs8[gracefulQueue].length === 0)
         return;
-      var elem = fs7[gracefulQueue].shift();
+      var elem = fs8[gracefulQueue].shift();
       var fn = elem[0];
       var args = elem[1];
       var err = elem[2];
@@ -24186,7 +24186,7 @@ var require_graceful_fs = __commonJS({
           debug2("RETRY", fn.name, args);
           fn.apply(null, args.concat([startTime]));
         } else {
-          fs7[gracefulQueue].push(elem);
+          fs8[gracefulQueue].push(elem);
         }
       }
       if (retryTimer === void 0) {
@@ -24621,10 +24621,10 @@ var require_mtime_precision = __commonJS({
   "node_modules/proper-lockfile/lib/mtime-precision.js"(exports2, module2) {
     "use strict";
     var cacheSymbol = Symbol();
-    function probe(file, fs7, callback) {
-      const cachedPrecision = fs7[cacheSymbol];
+    function probe(file, fs8, callback) {
+      const cachedPrecision = fs8[cacheSymbol];
       if (cachedPrecision) {
-        return fs7.stat(file, (err, stat) => {
+        return fs8.stat(file, (err, stat) => {
           if (err) {
             return callback(err);
           }
@@ -24632,16 +24632,16 @@ var require_mtime_precision = __commonJS({
         });
       }
       const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
-      fs7.utimes(file, mtime, mtime, (err) => {
+      fs8.utimes(file, mtime, mtime, (err) => {
         if (err) {
           return callback(err);
         }
-        fs7.stat(file, (err2, stat) => {
+        fs8.stat(file, (err2, stat) => {
           if (err2) {
             return callback(err2);
           }
           const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
-          Object.defineProperty(fs7, cacheSymbol, { value: precision });
+          Object.defineProperty(fs8, cacheSymbol, { value: precision });
           callback(null, stat.mtime, precision);
         });
       });
@@ -24662,8 +24662,8 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "node_modules/proper-lockfile/lib/lockfile.js"(exports2, module2) {
     "use strict";
-    var path4 = require("path");
-    var fs7 = require_graceful_fs();
+    var path5 = require("path");
+    var fs8 = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
     var mtimePrecision = require_mtime_precision();
@@ -24673,7 +24673,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file, options, callback) {
       if (!options.realpath) {
-        return callback(null, path4.resolve(file));
+        return callback(null, path5.resolve(file));
       }
       options.fs.realpath(file, callback);
     }
@@ -24794,7 +24794,7 @@ var require_lockfile = __commonJS({
         update: null,
         realpath: true,
         retries: 0,
-        fs: fs7,
+        fs: fs8,
         onCompromised: (err) => {
           throw err;
         },
@@ -24838,7 +24838,7 @@ var require_lockfile = __commonJS({
     }
     function unlock(file, options, callback) {
       options = {
-        fs: fs7,
+        fs: fs8,
         realpath: true,
         ...options
       };
@@ -24860,7 +24860,7 @@ var require_lockfile = __commonJS({
       options = {
         stale: 1e4,
         realpath: true,
-        fs: fs7,
+        fs: fs8,
         ...options
       };
       options.stale = Math.max(options.stale || 0, 2e3);
@@ -24899,16 +24899,16 @@ var require_lockfile = __commonJS({
 var require_adapter = __commonJS({
   "node_modules/proper-lockfile/lib/adapter.js"(exports2, module2) {
     "use strict";
-    var fs7 = require_graceful_fs();
-    function createSyncFs(fs8) {
+    var fs8 = require_graceful_fs();
+    function createSyncFs(fs9) {
       const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
-      const newFs = { ...fs8 };
+      const newFs = { ...fs9 };
       methods.forEach((method) => {
         newFs[method] = (...args) => {
           const callback = args.pop();
           let ret;
           try {
-            ret = fs8[`${method}Sync`](...args);
+            ret = fs9[`${method}Sync`](...args);
           } catch (err) {
             return callback(err);
           }
@@ -24946,7 +24946,7 @@ var require_adapter = __commonJS({
     }
     function toSyncOptions(options) {
       options = { ...options };
-      options.fs = createSyncFs(options.fs || fs7);
+      options.fs = createSyncFs(options.fs || fs8);
       if (typeof options.retries === "number" && options.retries > 0 || options.retries && typeof options.retries.retries === "number" && options.retries.retries > 0) {
         throw Object.assign(new Error("Cannot use retries with the sync api"), { code: "ESYNC" });
       }
@@ -24997,9 +24997,9 @@ var require_proper_lockfile = __commonJS({
 });
 
 // src/hook.ts
-var fs6 = __toESM(require("node:fs"), 1);
+var fs7 = __toESM(require("node:fs"), 1);
 var os2 = __toESM(require("node:os"), 1);
-var path3 = __toESM(require("node:path"), 1);
+var path4 = __toESM(require("node:path"), 1);
 
 // src/config.ts
 var fs = __toESM(require("node:fs"), 1);
@@ -25468,9 +25468,18 @@ function resolveDeferredAgentTurns(rows, sessionState, taskIdToToolUseId) {
     }
     routeToPendingTurn(pendingTurn, row, toolUseId);
   }
+  const continuedTurn = sessionState.pendingAgentTurns[sessionState.pendingAgentTurns.length - 1] ?? null;
+  let beforeFirstPrompt = true;
   for (const row of rows) {
     if (!isTaskNotificationRow(row)) {
-      remainingRows.push(row);
+      if (beforeFirstPrompt && getUserOrAssistantRoleFromRow(row) === "user" && !row.isMeta && !isToolResult(row)) {
+        beforeFirstPrompt = false;
+      }
+      if (beforeFirstPrompt && continuedTurn !== null) {
+        continuedTurn.rows.push(row);
+      } else {
+        remainingRows.push(row);
+      }
       continue;
     }
     const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
@@ -25768,6 +25777,7 @@ var TurnAssemblyState = class {
   toolResultsById = {};
   toolUseTimestampsById = {};
   injectedByToolId = {};
+  injectedMessages = [];
   currentRows = [];
 };
 function mergeAssistantRows(rows) {
@@ -25813,6 +25823,7 @@ function buildTurnFromState(state) {
     toolResultsById: { ...state.toolResultsById },
     toolUseTimestampsById: { ...state.toolUseTimestampsById },
     injectedByToolId: { ...state.injectedByToolId },
+    injectedMessages: [...state.injectedMessages],
     rows: [...state.currentRows]
   };
 }
@@ -25823,6 +25834,7 @@ function startNewTurn(row, state) {
   state.toolResultsById = {};
   state.toolUseTimestampsById = {};
   state.injectedByToolId = {};
+  state.injectedMessages = [];
   state.currentRows = [row];
 }
 function addAssistantRow(row, state) {
@@ -25851,12 +25863,15 @@ function addInjectedContextRow(row, state) {
     return false;
   }
   const sourceToolUseId = row.sourceToolUseID;
+  const text = extractTextFromContent(getContentFromRow(row));
   if (sourceToolUseId) {
-    const text = extractTextFromContent(getContentFromRow(row));
     if (text) {
       state.injectedByToolId[String(sourceToolUseId)] = text;
       state.currentRows.push(row);
     }
+  } else if (text && state.currentTurnUserRow !== null) {
+    state.injectedMessages.push(row);
+    state.currentRows.push(row);
   }
   return true;
 }
@@ -25867,10 +25882,13 @@ function addToolResultRow(row, state) {
   state.currentRows.push(row);
   const rowTimestamp = row.timestamp;
   const isAsyncLaunch = getAsyncLaunchFlagFromRow(row);
-  for (const toolResultBlock of getToolResultBlocks(getContentFromRow(row))) {
-    const toolUseId = toolResultBlock.tool_use_id;
+  for (const toolResultBlock2 of getToolResultBlocks(getContentFromRow(row))) {
+    const toolUseId = toolResultBlock2.tool_use_id;
     if (toolUseId) {
-      const entry = { content: toolResultBlock.content, timestamp: rowTimestamp };
+      const entry = { content: toolResultBlock2.content, timestamp: rowTimestamp };
+      if (toolResultBlock2.is_error === true) {
+        entry.isError = true;
+      }
       if (isAsyncLaunch !== null) {
         entry.isAsyncLaunch = isAsyncLaunch;
       }
@@ -26021,47 +26039,247 @@ function readSubagentJsonl(filePath) {
   return rows;
 }
 
+// src/tools.ts
+var crypto2 = __toESM(require("node:crypto"), 1);
+var fs5 = __toESM(require("node:fs"), 1);
+var path3 = __toESM(require("node:path"), 1);
+var MAX_TOOL_SET_CHANGES = 100;
+var TOOL_SET_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+function toolSetDir() {
+  return path3.join(stateDir(), "lmnr_tool_sets");
+}
+function toToolDefinition(entry) {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.name !== "string") {
+    return null;
+  }
+  const tool = { name: entry.name };
+  if (typeof entry.description === "string") {
+    tool.description = entry.description;
+  }
+  const schema = entry.input_schema ?? entry.schema;
+  if (typeof schema === "object" && schema !== null) {
+    tool.input_schema = schema;
+  }
+  return tool;
+}
+function toToolDefinitions(entries) {
+  return Array.isArray(entries) ? entries.map(toToolDefinition).filter((t) => t !== null) : [];
+}
+var ToolTimeline = class _ToolTimeline {
+  changes;
+  persist;
+  sets = /* @__PURE__ */ new Map();
+  current = { inline: [], deferred: [] };
+  /**
+   * `persist` writes each new set to the shared directory so later hook runs
+   * can resolve it; a subagent's timeline is built from its whole transcript
+   * every time, so it stays in memory.
+   */
+  constructor(changes = [], persist = true) {
+    this.changes = changes.slice(-MAX_TOOL_SET_CHANGES);
+    this.persist = persist;
+    const last = this.changes[this.changes.length - 1];
+    if (last) {
+      this.current = this.load(last.hash) ?? this.current;
+    }
+  }
+  /** Build an in-memory timeline from a whole transcript (a subagent's). */
+  static fromRows(rows) {
+    const timeline = new _ToolTimeline([], false);
+    for (const row of rows) {
+      timeline.observe(row);
+    }
+    return timeline;
+  }
+  /** Record the tool set a transcript row announces, if it announces one. */
+  observe(row) {
+    const attachment = row.type === "attachment" ? row.attachment : null;
+    if (typeof attachment !== "object" || attachment === null || typeof row.timestamp !== "string") {
+      return;
+    }
+    if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
+      this.record(row.timestamp, { ...this.current, inline: toToolDefinitions(attachment.tools) });
+    } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
+      const deferred = new Map(this.current.deferred.map((t) => [t.name, t]));
+      for (const tool of toToolDefinitions(attachment.entries)) {
+        deferred.set(tool.name, tool);
+      }
+      const sorted = [...deferred.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      this.record(row.timestamp, { ...this.current, deferred: sorted });
+    }
+  }
+  /**
+   * The tool definitions in effect at `timestamp`. A generation before the
+   * first recorded set gets that first set: the transcript's first request
+   * records no tools, yet it was sent the same ones.
+   */
+  toolsAt(timestamp) {
+    if (this.changes.length === 0) {
+      return null;
+    }
+    let change = this.changes[0];
+    if (typeof timestamp === "string") {
+      for (const c of this.changes) {
+        if (c.timestamp <= timestamp) {
+          change = c;
+        }
+      }
+    }
+    const set = this.load(change.hash);
+    if (set === null) {
+      return null;
+    }
+    const tools = [...set.inline, ...set.deferred];
+    return tools.length > 0 ? tools : null;
+  }
+  record(timestamp, set) {
+    this.current = set;
+    const hash = crypto2.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
+    this.sets.set(hash, set);
+    if (this.changes[this.changes.length - 1]?.hash === hash) {
+      return;
+    }
+    this.changes.push({ timestamp, hash });
+    this.changes = this.changes.slice(-MAX_TOOL_SET_CHANGES);
+    if (this.persist) {
+      saveToolSet(hash, set);
+    }
+  }
+  load(hash) {
+    const cached = this.sets.get(hash);
+    if (cached) {
+      return cached;
+    }
+    if (!this.persist) {
+      return null;
+    }
+    try {
+      const raw = JSON.parse(fs5.readFileSync(path3.join(toolSetDir(), `${hash}.json`), "utf-8"));
+      const set = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
+      this.sets.set(hash, set);
+      return set;
+    } catch (e) {
+      debug(`tool set ${hash.slice(0, 12)} unavailable: ${e}`);
+      return null;
+    }
+  }
+};
+function saveToolSet(hash, set) {
+  try {
+    const dir = toolSetDir();
+    fs5.mkdirSync(dir, { recursive: true });
+    const file = path3.join(dir, `${hash}.json`);
+    if (fs5.existsSync(file)) {
+      const now = /* @__PURE__ */ new Date();
+      fs5.utimesSync(file, now, now);
+      return;
+    }
+    fs5.writeFileSync(file, JSON.stringify(set), "utf-8");
+    const cutoff = Date.now() - TOOL_SET_MAX_AGE_MS;
+    for (const name of fs5.readdirSync(dir)) {
+      const other = path3.join(dir, name);
+      if (fs5.statSync(other).mtimeMs < cutoff) {
+        fs5.rmSync(other, { force: true });
+      }
+    }
+  } catch (e) {
+    debug(`saveToolSet failed: ${e}`);
+  }
+}
+function coerceToolSetChanges(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(
+    (c) => typeof c === "object" && c !== null && typeof c.timestamp === "string" && typeof c.hash === "string"
+  );
+}
+
 // src/genai.ts
-function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults) {
-  if (assistantIndex === 0) {
-    return [{ role: "user", content: userText }];
+function truncateStrings(value) {
+  if (typeof value === "string") {
+    return truncateText(value)[0];
   }
-  const toolResults = [...previousToolResults, ...readyToolResults];
-  if (toolResults.length > 0) {
-    return toolResults.map((toolResult) => ({
-      role: "tool",
-      content: jsonDumps(toolResult.output),
-      tool_call_id: toolResult.toolUseId,
-      name: toolResult.toolName
-    }));
+  if (Array.isArray(value)) {
+    return value.map(truncateStrings);
   }
-  return null;
+  if (typeof value === "object" && value !== null) {
+    const out = {};
+    for (const [key, inner] of Object.entries(value)) {
+      out[key] = truncateStrings(inner);
+    }
+    return out;
+  }
+  return value;
 }
-function buildGenerationOutputMessage(assistantText, toolUses) {
-  const output = { role: "assistant", content: assistantText || "" };
-  if (toolUses.length > 0) {
-    output.tool_calls = toolUses.map((toolUse) => ({
-      id: toolUse.id,
-      name: toolUse.name,
-      arguments: typeof toolUse.input === "object" && toolUse.input !== null && !Array.isArray(toolUse.input) ? toolUse.input : {}
-    }));
+function toAnthropicBlock(block) {
+  if (typeof block === "string") {
+    return block ? { type: "text", text: truncateText(block)[0] } : null;
   }
-  return output;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) {
+    return null;
+  }
+  switch (block.type) {
+    case "text":
+      return block.text ? { type: "text", text: truncateText(String(block.text))[0] } : null;
+    case "thinking":
+      return block.thinking ? { type: "thinking", thinking: truncateText(String(block.thinking))[0] } : null;
+    case "redacted_thinking":
+      return { type: "redacted_thinking", data: "" };
+    case "tool_use":
+      return { type: "tool_use", id: String(block.id ?? ""), name: String(block.name ?? ""), input: truncateStrings(block.input ?? {}) };
+    case "tool_result":
+      return toolResultBlock(String(block.tool_use_id ?? ""), block.content, block.is_error === true);
+    case "image":
+      return { type: "text", text: "[image]" };
+    case "document":
+      return { type: "text", text: "[document]" };
+    default:
+      return truncateStrings(block);
+  }
 }
-function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyToolResults) {
-  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
-  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
+function toAnthropicContent(content) {
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks.map(toAnthropicBlock).filter((b) => b !== null);
+}
+function toolResultBlock(toolUseId, content, isError) {
+  const block = {
+    type: "tool_result",
+    tool_use_id: toolUseId,
+    content: typeof content === "string" ? truncateText(content)[0] : toAnthropicContent(content ?? "")
+  };
+  if (isError) {
+    block.is_error = true;
+  }
+  return block;
+}
+function buildUserMessage(userRow) {
+  return { role: "user", content: toAnthropicContent(getContentFromRow(userRow)) };
+}
+function buildToolResultMessage(toolResults) {
+  return {
+    role: "user",
+    content: toolResults.map((r) => toolResultBlock(r.toolUseId, r.content, r.isError === true))
+  };
+}
+function buildGenerationAttributes(history, assistantMessage, toolDefinitions = null) {
+  const content = getContentFromRow(assistantMessage);
+  const toolUses = getToolUseBlocks(content);
+  const outputMessage = { role: "assistant", content: toAnthropicContent(content) };
   const model = getModel(assistantMessage);
   const attrs = {
     "gen_ai.system": "anthropic",
     "gen_ai.request.model": model,
-    "gen_ai.response.model": model
+    "gen_ai.response.model": model,
+    "gen_ai.input.messages": jsonDumps(history)
   };
-  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults);
-  if (inputMessages !== null) {
-    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
+  if (toolDefinitions !== null && toolDefinitions.length > 0) {
+    attrs["gen_ai.tool.definitions"] = jsonDumps(toolDefinitions);
   }
-  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
+  const stopReason = assistantMessage.message?.stop_reason;
+  attrs["gen_ai.output.messages"] = jsonDumps([
+    typeof stopReason === "string" ? { ...outputMessage, stop_reason: stopReason } : outputMessage
+  ]);
   const usageDetails = getUsageDetailsFromRow(assistantMessage);
   if (usageDetails !== null) {
     let total = 0;
@@ -26071,7 +26289,7 @@ function buildGenerationAttributes(assistantIndex, assistantMessage, userText, p
     }
     attrs["llm.usage.total_tokens"] = total;
   }
-  return [attrs, toolUses];
+  return [attrs, toolUses, outputMessage];
 }
 
 // src/emit.ts
@@ -26114,6 +26332,9 @@ function getToolInputForObservation(toolUse) {
   }
   return toolInputRaw;
 }
+function toolOutputText(raw) {
+  return truncateText(typeof raw === "string" ? raw : jsonDumps(Array.isArray(raw) ? toAnthropicContent(raw) : raw))[0];
+}
 function getToolResultForObservation(toolResultEntry) {
   const empty = {
     output: null,
@@ -26124,16 +26345,13 @@ function getToolResultForObservation(toolResultEntry) {
   if (!toolResultEntry) {
     return empty;
   }
-  const outputRaw = toolResultEntry.content;
-  const outputStr = typeof outputRaw === "string" ? outputRaw : jsonDumps(outputRaw);
-  const [output] = truncateText(outputStr);
+  const output = toolOutputText(toolResultEntry.content);
   const resultTimestamp = parseTimestamp(toolResultEntry.timestamp);
   const finalOutputRaw = toolResultEntry.finalContent;
   if (finalOutputRaw === void 0 || finalOutputRaw === null) {
     return { output, resultTimestamp, finalOutput: null, finalResultTimestamp: null };
   }
-  const finalOutputStr = typeof finalOutputRaw === "string" ? finalOutputRaw : jsonDumps(finalOutputRaw);
-  const [finalOutput] = truncateText(finalOutputStr);
+  const finalOutput = toolOutputText(finalOutputRaw);
   const finalResultTimestamp = parseTimestamp(toolResultEntry.finalTimestamp);
   return { output, resultTimestamp, finalOutput, finalResultTimestamp };
 }
@@ -26211,7 +26429,7 @@ function emitSingleToolObservation(emitter, parentSpan, turn, assistantTimestamp
         readyTimestamp: toolResult.finalResultTimestamp
       });
     } else {
-      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp);
+      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp, subagentMap);
     }
   }
   const toolEndTimestamp = getLatestTimestamp(
@@ -26225,12 +26443,12 @@ function emitSingleToolObservation(emitter, parentSpan, turn, assistantTimestamp
   if (toolResult.finalResultTimestamp !== null && toolResult.finalOutput !== null) {
     pendingAsyncToolResults.push({
       timestamp: toolResult.finalResultTimestamp,
-      toolResult: { toolUseId, toolName, output: toolResult.finalOutput }
+      toolResult: { toolUseId, content: toolResultEntry.finalContent ?? null }
     });
   }
   return {
     handoffTimestamp,
-    toolResult: { toolUseId, toolName, output: toolResult.output },
+    toolResult: { toolUseId, content: toolResultEntry?.content ?? null, isError: toolResultEntry?.isError },
     latestEndTimestamp: getLatestTimestamp(toolEndTimestamp, subagentEndTimestamp)
   };
 }
@@ -26288,11 +26506,12 @@ function updatePendingSubagentDisplayStartAfterLaunchResponse(pendingSubagents, 
     }
   }
 }
-function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp) {
+function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp, subagentMap) {
   const p = subagent.path;
   if (typeof p !== "string") {
     return startTimestamp;
   }
+  const nestedSubagentMap = subagentMap ? Object.fromEntries(Object.entries(subagentMap).filter(([, s]) => s.path !== p)) : null;
   const rows = readSubagentJsonl(p);
   if (rows === null) {
     return startTimestamp;
@@ -26301,6 +26520,7 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   if (turns.length === 0) {
     return startTimestamp;
   }
+  const subagentToolTimeline = ToolTimeline.fromRows(rows);
   const firstTurn = turns[0];
   const subagentStartTimestamp = startTimestamp ?? parseTimestamp(firstTurn.userMsg);
   const [subagentInputText] = truncateText(extractTextFromContent(getContentFromRow(firstTurn.userMsg)));
@@ -26324,7 +26544,15 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   let latestEndTimestamp = subagentStartTimestamp;
   let previousStartTimestamp = subagentStartTimestamp;
   for (const turn of turns) {
-    const latestTurnTimestamp = emitTurnObservations(emitter, subagentSpan, turn, previousStartTimestamp, "Subagent LLM Call", null);
+    const latestTurnTimestamp = emitTurnObservations(
+      emitter,
+      subagentSpan,
+      turn,
+      previousStartTimestamp,
+      "Subagent LLM Call",
+      nestedSubagentMap,
+      subagentToolTimeline
+    );
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, latestTurnTimestamp);
     if (latestTurnTimestamp !== null) {
       previousStartTimestamp = latestTurnTimestamp;
@@ -26334,8 +26562,9 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   subagentSpan.end(getLatestTimestamp(latestEndTimestamp, subagentStartTimestamp));
   return latestEndTimestamp;
 }
-function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generationPrefix = "LLM Call", subagentMap = null) {
-  const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
+function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generationPrefix = "LLM Call", subagentMap = null, toolTimeline = null) {
+  const history = [buildUserMessage(turn.userMsg)];
+  let pendingInjectedMessages = [...turn.injectedMessages];
   let previousTimestamp = startTimestamp;
   let previousToolResults = [];
   let pendingAsyncToolResults = [];
@@ -26351,7 +26580,8 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
           emitter,
           readySubagent.parentSpan ?? parentSpan,
           readySubagent.subagent,
-          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp
+          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp,
+          subagentMap
         );
         latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
       }
@@ -26363,13 +26593,16 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       pendingAsyncToolResults = stillPending;
       previousTimestamp = getLatestTimestamp(previousTimestamp, ...ready.map((r) => r.timestamp));
     }
-    const [generationAttrs, toolUses] = buildGenerationAttributes(
-      assistantIndex,
-      assistantMessage,
-      userText,
-      previousToolResults,
-      readyAsyncToolResults.map((r) => r.toolResult)
-    );
+    const toolResultsForInput = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
+    if (assistantIndex > 0 && toolResultsForInput.length > 0) {
+      history.push(buildToolResultMessage(toolResultsForInput));
+    }
+    const [readyInjected, laterInjected] = partitionReady(pendingInjectedMessages, (row) => parseTimestamp(row), assistantTimestamp);
+    pendingInjectedMessages = laterInjected;
+    history.push(...readyInjected.map(buildUserMessage));
+    const toolDefinitions = toolTimeline?.toolsAt(assistantMessage.timestamp) ?? null;
+    const [generationAttrs, toolUses, outputMessage] = buildGenerationAttributes(history, assistantMessage, toolDefinitions);
+    history.push(outputMessage);
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
       name: `${generationPrefix} ${assistantIndex + 1}`,
@@ -26405,7 +26638,8 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       emitter,
       pendingSubagent.parentSpan ?? parentSpan,
       pendingSubagent.subagent,
-      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp
+      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp,
+      subagentMap
     );
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
   }
@@ -26453,7 +26687,7 @@ function buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPa
   }
   return attrs;
 }
-function emitTurn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap = null) {
+function emitTurn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap = null, toolTimeline = null) {
   const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
   const lastAssistant = turn.assistantMsgs[turn.assistantMsgs.length - 1];
   const [finalAssistantText] = truncateText(extractTextFromContent(getContentFromRow(lastAssistant)));
@@ -26468,14 +26702,14 @@ function emitTurn(emitter, config, sessionId, turnNum, turn, transcriptPath, sub
     inputValue: { role: "user", content: userText },
     attributes: buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPath)
   });
-  const obsEndTs = emitTurnObservations(emitter, rootSpan, turn, userTs, "LLM Call", subagentMap);
+  const obsEndTs = emitTurnObservations(emitter, rootSpan, turn, userTs, "LLM Call", subagentMap, toolTimeline);
   rootSpan.setAttributes({ [SPAN_OUTPUT_ATTR]: jsonDumps({ role: "assistant", content: finalAssistantText }) });
   rootSpan.end(getLatestTimestamp(turnEndTs, lastAssistantTs, obsEndTs, userTs));
 }
 
 // src/state.ts
-var crypto2 = __toESM(require("node:crypto"), 1);
-var fs5 = __toESM(require("node:fs"), 1);
+var crypto3 = __toESM(require("node:crypto"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
 function coerceRows(value) {
   return Array.isArray(value) ? value : [];
@@ -26517,6 +26751,10 @@ var SessionState = class _SessionState {
   // it together with the response. Guards against the transcript being flushed
   // between the Stop hook firing and the assistant row landing.
   pendingTurnRows;
+  // When each tool set came into effect (sets themselves live in tools.ts's
+  // shared directory). Snapshots are written only on change, so later hook
+  // runs need this to know which tools a generation was offered.
+  toolSetChanges;
   constructor(init = {}) {
     this.offset = init.offset ?? 0;
     this.buffer = init.buffer ?? "";
@@ -26524,6 +26762,7 @@ var SessionState = class _SessionState {
     this.pendingAgentTurns = init.pendingAgentTurns ?? [];
     this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
     this.pendingTurnRows = init.pendingTurnRows ?? [];
+    this.toolSetChanges = init.toolSetChanges ?? [];
   }
   /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
   static fromJSON(raw) {
@@ -26534,7 +26773,8 @@ var SessionState = class _SessionState {
       turnCount: Number(s.turnCount ?? 0),
       pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
       pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
-      pendingTurnRows: coerceRows(s.pendingTurnRows)
+      pendingTurnRows: coerceRows(s.pendingTurnRows),
+      toolSetChanges: coerceToolSetChanges(s.toolSetChanges)
     });
   }
   /** Project to the persisted shape. The `updated` bookkeeping field is stamped by the writer. */
@@ -26545,24 +26785,25 @@ var SessionState = class _SessionState {
       turnCount: this.turnCount,
       pendingAgentTurns: this.pendingAgentTurns,
       pendingTaskNotifications: this.pendingTaskNotifications,
-      pendingTurnRows: this.pendingTurnRows
+      pendingTurnRows: this.pendingTurnRows,
+      toolSetChanges: this.toolSetChanges
     };
   }
 };
 function loadHookState() {
   try {
     const file = stateFile();
-    if (!fs5.existsSync(file)) {
+    if (!fs6.existsSync(file)) {
       return {};
     }
-    return JSON.parse(fs5.readFileSync(file, "utf-8"));
+    return JSON.parse(fs6.readFileSync(file, "utf-8"));
   } catch {
     return {};
   }
 }
 function getSessionStateKey(sessionId, transcriptPath) {
   const raw = `${sessionId}::${transcriptPath}`;
-  return crypto2.createHash("sha256").update(raw, "utf-8").digest("hex");
+  return crypto3.createHash("sha256").update(raw, "utf-8").digest("hex");
 }
 function getSessionState(globalState, key) {
   return SessionState.fromJSON(globalState[key]);
@@ -26591,10 +26832,10 @@ function saveHookState(state) {
       }
     }
     const file = stateFile();
-    fs5.mkdirSync(stateDir(), { recursive: true });
+    fs6.mkdirSync(stateDir(), { recursive: true });
     const tmp = `${file}.tmp`;
-    fs5.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
-    fs5.renameSync(tmp, file);
+    fs6.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+    fs6.renameSync(tmp, file);
   } catch (e) {
     info(
       `saveHookState failed: ${e}; state not persisted \u2014 already-exported turns may be re-emitted as duplicates on the next hook run`
@@ -26607,9 +26848,9 @@ function saveSessionState(globalState, key, sessionState) {
 }
 async function withStateLock(fn) {
   const lock = lockFile();
-  fs5.mkdirSync(stateDir(), { recursive: true });
+  fs6.mkdirSync(stateDir(), { recursive: true });
   try {
-    fs5.closeSync(fs5.openSync(lock, "a"));
+    fs6.closeSync(fs6.openSync(lock, "a"));
   } catch {
     return fn();
   }
@@ -26633,12 +26874,12 @@ async function withStateLock(fn) {
 }
 
 // src/pipeline.ts
-function emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit, sessionState, subagentMap, emitTurnFn = emitTurn) {
+function emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit, sessionState, subagentMap, emitTurnFn = emitTurn, toolTimeline = null) {
   let emitted = 0;
   for (const turn of turnsToEmit) {
     const turnNum = sessionState.turnCount + emitted + 1;
     try {
-      emitTurnFn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap);
+      emitTurnFn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap, toolTimeline);
     } catch (e) {
       info(`emitTurn failed: ${e}`);
       continue;
@@ -26683,9 +26924,15 @@ function splitTrailingIncompleteTurn(rows, finalAssistantText = "") {
   }
   return [rows, []];
 }
-function getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns = false, finalAssistantText = "") {
+function getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns = false, finalAssistantText = "", toolTimeline = null) {
   let rows;
   [rows, sessionState] = readNewJsonl(transcriptPath, sessionState, flushDeferredAgentTurns);
+  if (toolTimeline !== null) {
+    for (const row of rows) {
+      toolTimeline.observe(row);
+    }
+    sessionState.toolSetChanges = toolTimeline.changes;
+  }
   if (sessionState.pendingTurnRows.length > 0) {
     rows = [...sessionState.pendingTurnRows, ...rows];
     sessionState.pendingTurnRows = [];
@@ -26728,20 +26975,32 @@ async function emitNewTurnsFromTranscript(emitter, config, sessionId, transcript
     if (Object.keys(subagentMap).length > 0) {
       debug(`Discovered ${Object.keys(subagentMap).length} subagent transcript(s)`);
     }
+    const toolTimeline = new ToolTimeline(sessionState.toolSetChanges);
     let turns;
     [turns, sessionState] = getNewTurnsFromTranscript(
       transcriptPath,
       sessionState,
       subagentMap,
       flushDeferredAgentTurns,
-      opts.finalAssistantText ?? ""
+      opts.finalAssistantText ?? "",
+      toolTimeline
     );
     if (turns.length === 0) {
       saveSessionState(state, key, sessionState);
       return 0;
     }
     const turnsToEmit = getTurnsToEmit(turns, sessionState, flushDeferredAgentTurns);
-    const emitted = emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit, sessionState, subagentMap);
+    const emitted = emitReadyTurns(
+      emitter,
+      config,
+      sessionId,
+      transcriptPath,
+      turnsToEmit,
+      sessionState,
+      subagentMap,
+      emitTurn,
+      toolTimeline
+    );
     const exported = await exportFn(emitter);
     if (!exported) {
       info("OTLP export failed; keeping previous state so these turns are retried on the next hook run");
@@ -26756,7 +27015,7 @@ async function emitNewTurnsFromTranscript(emitter, config, sessionId, transcript
 // src/hook.ts
 function readStdin() {
   try {
-    return fs6.readFileSync(0, "utf-8");
+    return fs7.readFileSync(0, "utf-8");
   } catch {
     return "";
   }
@@ -26782,7 +27041,7 @@ function readHookPayload() {
 }
 function expandUser(p) {
   if (p === "~" || p.startsWith("~/")) {
-    return path3.join(os2.homedir(), p.slice(1));
+    return path4.join(os2.homedir(), p.slice(1));
   }
   return p;
 }
@@ -26792,7 +27051,7 @@ function extractSessionIdAndTranscriptPath(payload) {
   let transcriptPath = null;
   if (transcriptPathRaw) {
     try {
-      transcriptPath = path3.resolve(expandUser(String(transcriptPathRaw)));
+      transcriptPath = path4.resolve(expandUser(String(transcriptPathRaw)));
     } catch {
       transcriptPath = null;
     }
@@ -26805,7 +27064,7 @@ function getSessionIdAndTranscriptPath(payload) {
     debug("Missing session_id or transcript_path from hook payload; exiting.");
     return null;
   }
-  if (!fs6.existsSync(transcriptPath)) {
+  if (!fs7.existsSync(transcriptPath)) {
     debug(`Transcript path does not exist: ${transcriptPath}`);
     return null;
   }

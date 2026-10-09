@@ -50,3 +50,13 @@ export function spansByName(spans: ReadableSpan[]): Record<string, ReadableSpan>
   }
   return out;
 }
+
+/** Claude Code's internal record of the inline tools sent with a request. */
+export function promptSnapshotRow(tools: any[] | null, ts: string): Row {
+  return { type: "attachment", attachment: { type: "prompt_snapshot", systemPrompt: ["…"], tools }, timestamp: ts };
+}
+
+/** Claude Code's internal record of deferred tools ToolSearch has loaded. */
+export function deferredToolsRow(entries: any[], ts: string): Row {
+  return { type: "attachment", attachment: { type: "deferred_tools_record", entries }, timestamp: ts };
+}

@@ -33,6 +33,7 @@ import {
   readNewJsonl,
 } from "./transcript.js";
 import { buildTurns, type Turn } from "./turns.js";
+import { ToolTimeline } from "./tools.js";
 import type { Row } from "./types.js";
 
 export function emitReadyTurns(
@@ -43,13 +44,14 @@ export function emitReadyTurns(
   turnsToEmit: Turn[],
   sessionState: SessionState,
   subagentMap: Record<string, SubagentTranscript>,
-  emitTurnFn: typeof emitTurn = emitTurn
+  emitTurnFn: typeof emitTurn = emitTurn,
+  toolTimeline: ToolTimeline | null = null
 ): number {
   let emitted = 0;
   for (const turn of turnsToEmit) {
     const turnNum = sessionState.turnCount + emitted + 1;
     try {
-      emitTurnFn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap);
+      emitTurnFn(emitter, config, sessionId, turnNum, turn, transcriptPath, subagentMap, toolTimeline);
     } catch (e) {
       // Log at INFO so emit failures are visible without CC_LMNR_DEBUG=true.
       // The failed turn is not counted, so turnCount only reflects turns whose
@@ -118,13 +120,21 @@ export function getNewTurnsFromTranscript(
   sessionState: SessionState,
   subagentMap?: Record<string, SubagentTranscript>,
   flushDeferredAgentTurns = false,
-  finalAssistantText = ""
+  finalAssistantText = "",
+  toolTimeline: ToolTimeline | null = null
 ): [Turn[], SessionState] {
   let rows: Row[];
   // At SessionEnd no more transcript bytes are coming, so a buffered final
   // line that is complete JSON (file ended without a trailing newline) is
   // flushed instead of being held forever.
   [rows, sessionState] = readNewJsonl(transcriptPath, sessionState, flushDeferredAgentTurns);
+  // Only new rows: rows replayed from state below were observed when first read.
+  if (toolTimeline !== null) {
+    for (const row of rows) {
+      toolTimeline.observe(row);
+    }
+    sessionState.toolSetChanges = toolTimeline.changes;
+  }
   // Replay an incomplete trailing turn held from a prior run (chronologically
   // oldest), then let it flow through the normal pipeline.
   if (sessionState.pendingTurnRows.length > 0) {
@@ -197,13 +207,15 @@ export async function emitNewTurnsFromTranscript(
       debug(`Discovered ${Object.keys(subagentMap).length} subagent transcript(s)`);
     }
 
+    const toolTimeline = new ToolTimeline(sessionState.toolSetChanges);
     let turns: Turn[];
     [turns, sessionState] = getNewTurnsFromTranscript(
       transcriptPath,
       sessionState,
       subagentMap,
       flushDeferredAgentTurns,
-      opts.finalAssistantText ?? ""
+      opts.finalAssistantText ?? "",
+      toolTimeline
     );
     if (turns.length === 0) {
       saveSessionState(state, key, sessionState);
@@ -211,7 +223,17 @@ export async function emitNewTurnsFromTranscript(
     }
 
     const turnsToEmit = getTurnsToEmit(turns, sessionState, flushDeferredAgentTurns);
-    const emitted = emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit, sessionState, subagentMap);
+    const emitted = emitReadyTurns(
+      emitter,
+      config,
+      sessionId,
+      transcriptPath,
+      turnsToEmit,
+      sessionState,
+      subagentMap,
+      emitTurn,
+      toolTimeline
+    );
 
     // Only persist the advanced offset after a successful export; on failure the
     // old state stays on disk so the next hook run re-reads the same bytes and

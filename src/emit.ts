@@ -9,7 +9,14 @@ import {
 import { ASSOC_PREFIX, SPAN_OUTPUT_ATTR, startSpan, TraceEmitter, type SpanHandle } from "./tracer.js";
 import { buildTurns, type ToolResultEntry, type Turn } from "./turns.js";
 import { readSubagentJsonl, type SubagentTranscript } from "./subagents.js";
-import { buildGenerationAttributes, type GenerationToolResult } from "./genai.js";
+import { ToolTimeline } from "./tools.js";
+import {
+  buildGenerationAttributes,
+  buildToolResultMessage,
+  buildUserMessage,
+  toAnthropicContent,
+  type GenerationToolResult,
+} from "./genai.js";
 import type { Json, Row } from "./types.js";
 import { getLatestTimestamp, jsonDumps } from "./util.js";
 
@@ -96,6 +103,15 @@ function getToolInputForObservation(toolUse: Row): Json {
   return toolInputRaw;
 }
 
+/**
+ * A tool result as span output. A block array (e.g. Read on an image) goes
+ * through the same bounds as LLM messages, so base64 images become markers
+ * instead of a truncated, unusable data string.
+ */
+function toolOutputText(raw: Json): string {
+  return truncateText(typeof raw === "string" ? raw : jsonDumps(Array.isArray(raw) ? toAnthropicContent(raw) : raw))[0];
+}
+
 function getToolResultForObservation(toolResultEntry: ToolResultEntry | null | undefined): ToolResultForObservation {
   const empty: ToolResultForObservation = {
     output: null,
@@ -107,9 +123,7 @@ function getToolResultForObservation(toolResultEntry: ToolResultEntry | null | u
     return empty;
   }
 
-  const outputRaw = toolResultEntry.content;
-  const outputStr = typeof outputRaw === "string" ? outputRaw : jsonDumps(outputRaw);
-  const [output] = truncateText(outputStr);
+  const output = toolOutputText(toolResultEntry.content);
   const resultTimestamp = parseTimestamp(toolResultEntry.timestamp);
 
   const finalOutputRaw = toolResultEntry.finalContent;
@@ -117,8 +131,7 @@ function getToolResultForObservation(toolResultEntry: ToolResultEntry | null | u
     return { output, resultTimestamp, finalOutput: null, finalResultTimestamp: null };
   }
 
-  const finalOutputStr = typeof finalOutputRaw === "string" ? finalOutputRaw : jsonDumps(finalOutputRaw);
-  const [finalOutput] = truncateText(finalOutputStr);
+  const finalOutput = toolOutputText(finalOutputRaw);
   const finalResultTimestamp = parseTimestamp(toolResultEntry.finalTimestamp);
   return { output, resultTimestamp, finalOutput, finalResultTimestamp };
 }
@@ -229,7 +242,7 @@ function emitSingleToolObservation(
         readyTimestamp: toolResult.finalResultTimestamp,
       });
     } else {
-      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp);
+      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp, subagentMap);
     }
   }
 
@@ -246,13 +259,13 @@ function emitSingleToolObservation(
   if (toolResult.finalResultTimestamp !== null && toolResult.finalOutput !== null) {
     pendingAsyncToolResults.push({
       timestamp: toolResult.finalResultTimestamp,
-      toolResult: { toolUseId, toolName, output: toolResult.finalOutput },
+      toolResult: { toolUseId, content: toolResultEntry!.finalContent ?? null },
     });
   }
 
   return {
     handoffTimestamp,
-    toolResult: { toolUseId, toolName, output: toolResult.output },
+    toolResult: { toolUseId, content: toolResultEntry?.content ?? null, isError: toolResultEntry?.isError },
     latestEndTimestamp: getLatestTimestamp(toolEndTimestamp, subagentEndTimestamp),
   };
 }
@@ -337,12 +350,20 @@ function emitSubagentObservations(
   emitter: TraceEmitter,
   parentSpan: SpanHandle,
   subagent: SubagentTranscript,
-  startTimestamp: Date | null
+  startTimestamp: Date | null,
+  subagentMap: Record<string, SubagentTranscript> | null
 ): Date | null {
   const p = subagent.path;
   if (typeof p !== "string") {
     return startTimestamp;
   }
+  // A subagent's own Agent calls launch nested subagents, whose transcripts sit
+  // in the same subagents/ directory keyed by the launching tool_use id. Pass
+  // the map down without this subagent's entry, so no descendant can map back
+  // to an ancestor and recurse forever.
+  const nestedSubagentMap = subagentMap
+    ? Object.fromEntries(Object.entries(subagentMap).filter(([, s]) => s.path !== p))
+    : null;
   const rows = readSubagentJsonl(p);
   if (rows === null) {
     return startTimestamp;
@@ -352,6 +373,9 @@ function emitSubagentObservations(
   if (turns.length === 0) {
     return startTimestamp;
   }
+  // A subagent is offered its own tools (e.g. SubagentHandback), recorded in
+  // its own transcript.
+  const subagentToolTimeline = ToolTimeline.fromRows(rows);
 
   const firstTurn = turns[0]!;
   const subagentStartTimestamp = startTimestamp ?? parseTimestamp(firstTurn.userMsg);
@@ -379,7 +403,15 @@ function emitSubagentObservations(
   let latestEndTimestamp = subagentStartTimestamp;
   let previousStartTimestamp = subagentStartTimestamp;
   for (const turn of turns) {
-    const latestTurnTimestamp = emitTurnObservations(emitter, subagentSpan, turn, previousStartTimestamp, "Subagent LLM Call", null);
+    const latestTurnTimestamp = emitTurnObservations(
+      emitter,
+      subagentSpan,
+      turn,
+      previousStartTimestamp,
+      "Subagent LLM Call",
+      nestedSubagentMap,
+      subagentToolTimeline
+    );
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, latestTurnTimestamp);
     if (latestTurnTimestamp !== null) {
       previousStartTimestamp = latestTurnTimestamp;
@@ -399,9 +431,13 @@ function emitTurnObservations(
   turn: Turn,
   startTimestamp: Date | null,
   generationPrefix = "LLM Call",
-  subagentMap: Record<string, SubagentTranscript> | null = null
+  subagentMap: Record<string, SubagentTranscript> | null = null,
+  toolTimeline: ToolTimeline | null = null
 ): Date | null {
-  const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
+  // The turn's messages so far, in Anthropic Messages API shape: each
+  // generation's input is the history up to it.
+  const history: Row[] = [buildUserMessage(turn.userMsg)];
+  let pendingInjectedMessages = [...turn.injectedMessages];
   let previousTimestamp = startTimestamp;
   let previousToolResults: GenerationToolResult[] = [];
   let pendingAsyncToolResults: PendingAsyncToolResult[] = [];
@@ -418,7 +454,8 @@ function emitTurnObservations(
           emitter,
           readySubagent.parentSpan ?? parentSpan,
           readySubagent.subagent,
-          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp
+          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp,
+          subagentMap
         );
         latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
       }
@@ -432,13 +469,18 @@ function emitTurnObservations(
       previousTimestamp = getLatestTimestamp(previousTimestamp, ...ready.map((r) => r.timestamp));
     }
 
-    const [generationAttrs, toolUses] = buildGenerationAttributes(
-      assistantIndex,
-      assistantMessage,
-      userText,
-      previousToolResults,
-      readyAsyncToolResults.map((r) => r.toolResult)
-    );
+    const toolResultsForInput = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
+    if (assistantIndex > 0 && toolResultsForInput.length > 0) {
+      history.push(buildToolResultMessage(toolResultsForInput));
+    }
+    // Context injected before this generation (e.g. a background agent's
+    // report) is what it answers, so it goes into its input.
+    const [readyInjected, laterInjected] = partitionReady(pendingInjectedMessages, (row) => parseTimestamp(row), assistantTimestamp);
+    pendingInjectedMessages = laterInjected;
+    history.push(...readyInjected.map(buildUserMessage));
+    const toolDefinitions = toolTimeline?.toolsAt(assistantMessage.timestamp) ?? null;
+    const [generationAttrs, toolUses, outputMessage] = buildGenerationAttributes(history, assistantMessage, toolDefinitions);
+    history.push(outputMessage);
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
       name: `${generationPrefix} ${assistantIndex + 1}`,
@@ -478,7 +520,8 @@ function emitTurnObservations(
       emitter,
       pendingSubagent.parentSpan ?? parentSpan,
       pendingSubagent.subagent,
-      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp
+      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp,
+      subagentMap
     );
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
   }
@@ -548,7 +591,8 @@ export function emitTurn(
   turnNum: number,
   turn: Turn,
   transcriptPath: string,
-  subagentMap: Record<string, SubagentTranscript> | null = null
+  subagentMap: Record<string, SubagentTranscript> | null = null,
+  toolTimeline: ToolTimeline | null = null
 ): void {
   const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
 
@@ -567,7 +611,7 @@ export function emitTurn(
     inputValue: { role: "user", content: userText },
     attributes: buildTraceRootAttributes(config, sessionId, turnNum, turn, transcriptPath),
   });
-  const obsEndTs = emitTurnObservations(emitter, rootSpan, turn, userTs, "LLM Call", subagentMap);
+  const obsEndTs = emitTurnObservations(emitter, rootSpan, turn, userTs, "LLM Call", subagentMap, toolTimeline);
   rootSpan.setAttributes({ [SPAN_OUTPUT_ATTR]: jsonDumps({ role: "assistant", content: finalAssistantText }) });
   rootSpan.end(getLatestTimestamp(turnEndTs, lastAssistantTs, obsEndTs, userTs));
 }

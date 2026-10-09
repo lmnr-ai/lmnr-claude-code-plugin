@@ -24,6 +24,7 @@ import type { Json, Row } from "./types.js";
 export interface ToolResultEntry {
   content: Json;
   timestamp?: Json;
+  isError?: boolean;
   isAsyncLaunch?: boolean;
   finalContent?: Json;
   finalTimestamp?: Json;
@@ -37,6 +38,9 @@ export interface Turn {
   // Injected context (e.g. skill instructions) keyed by the tool_use id it
   // belongs to, taken from isMeta rows carrying sourceToolUseID.
   injectedByToolId: Record<string, string>;
+  // Other context Claude Code injected mid-turn as isMeta user rows, in order —
+  // e.g. a background agent's report arriving as an <agent-message>.
+  injectedMessages: Row[];
   rows: Row[];
 }
 
@@ -47,6 +51,7 @@ class TurnAssemblyState {
   toolResultsById: Record<string, ToolResultEntry> = {};
   toolUseTimestampsById: Record<string, Json> = {};
   injectedByToolId: Record<string, string> = {};
+  injectedMessages: Row[] = [];
   currentRows: Row[] = [];
 }
 
@@ -106,6 +111,7 @@ function buildTurnFromState(state: TurnAssemblyState): Turn | null {
     toolResultsById: { ...state.toolResultsById },
     toolUseTimestampsById: { ...state.toolUseTimestampsById },
     injectedByToolId: { ...state.injectedByToolId },
+    injectedMessages: [...state.injectedMessages],
     rows: [...state.currentRows],
   };
 }
@@ -117,6 +123,7 @@ function startNewTurn(row: Row, state: TurnAssemblyState): void {
   state.toolResultsById = {};
   state.toolUseTimestampsById = {};
   state.injectedByToolId = {};
+  state.injectedMessages = [];
   state.currentRows = [row];
 }
 
@@ -154,12 +161,16 @@ function addInjectedContextRow(row: Row, state: TurnAssemblyState): boolean {
   // tool_use via sourceToolUseID; keep the text so emit can optionally attach
   // it to that tool span.
   const sourceToolUseId = row.sourceToolUseID;
+  const text = extractTextFromContent(getContentFromRow(row));
   if (sourceToolUseId) {
-    const text = extractTextFromContent(getContentFromRow(row));
     if (text) {
       state.injectedByToolId[String(sourceToolUseId)] = text;
       state.currentRows.push(row);
     }
+  } else if (text && state.currentTurnUserRow !== null) {
+    // Claude reads this as input, so the next generation's history shows it.
+    state.injectedMessages.push(row);
+    state.currentRows.push(row);
   }
   return true;
 }
@@ -176,6 +187,9 @@ function addToolResultRow(row: Row, state: TurnAssemblyState): boolean {
     const toolUseId = toolResultBlock.tool_use_id;
     if (toolUseId) {
       const entry: ToolResultEntry = { content: toolResultBlock.content, timestamp: rowTimestamp };
+      if (toolResultBlock.is_error === true) {
+        entry.isError = true;
+      }
       if (isAsyncLaunch !== null) {
         entry.isAsyncLaunch = isAsyncLaunch;
       }
