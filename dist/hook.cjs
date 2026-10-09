@@ -25468,9 +25468,18 @@ function resolveDeferredAgentTurns(rows, sessionState, taskIdToToolUseId) {
     }
     routeToPendingTurn(pendingTurn, row, toolUseId);
   }
+  const continuedTurn = sessionState.pendingAgentTurns[sessionState.pendingAgentTurns.length - 1] ?? null;
+  let beforeFirstPrompt = true;
   for (const row of rows) {
     if (!isTaskNotificationRow(row)) {
-      remainingRows.push(row);
+      if (beforeFirstPrompt && getUserOrAssistantRoleFromRow(row) === "user" && !row.isMeta && !isToolResult(row)) {
+        beforeFirstPrompt = false;
+      }
+      if (beforeFirstPrompt && continuedTurn !== null) {
+        continuedTurn.rows.push(row);
+      } else {
+        remainingRows.push(row);
+      }
       continue;
     }
     const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);
@@ -25768,6 +25777,7 @@ var TurnAssemblyState = class {
   toolResultsById = {};
   toolUseTimestampsById = {};
   injectedByToolId = {};
+  injectedMessages = [];
   currentRows = [];
 };
 function mergeAssistantRows(rows) {
@@ -25813,6 +25823,7 @@ function buildTurnFromState(state) {
     toolResultsById: { ...state.toolResultsById },
     toolUseTimestampsById: { ...state.toolUseTimestampsById },
     injectedByToolId: { ...state.injectedByToolId },
+    injectedMessages: [...state.injectedMessages],
     rows: [...state.currentRows]
   };
 }
@@ -25823,6 +25834,7 @@ function startNewTurn(row, state) {
   state.toolResultsById = {};
   state.toolUseTimestampsById = {};
   state.injectedByToolId = {};
+  state.injectedMessages = [];
   state.currentRows = [row];
 }
 function addAssistantRow(row, state) {
@@ -25851,12 +25863,15 @@ function addInjectedContextRow(row, state) {
     return false;
   }
   const sourceToolUseId = row.sourceToolUseID;
+  const text = extractTextFromContent(getContentFromRow(row));
   if (sourceToolUseId) {
-    const text = extractTextFromContent(getContentFromRow(row));
     if (text) {
       state.injectedByToolId[String(sourceToolUseId)] = text;
       state.currentRows.push(row);
     }
+  } else if (text && state.currentTurnUserRow !== null) {
+    state.injectedMessages.push(row);
+    state.currentRows.push(row);
   }
   return true;
 }
@@ -26158,6 +26173,9 @@ function getToolInputForObservation(toolUse) {
   }
   return toolInputRaw;
 }
+function toolOutputText(raw) {
+  return truncateText(typeof raw === "string" ? raw : jsonDumps(Array.isArray(raw) ? toAnthropicContent(raw) : raw))[0];
+}
 function getToolResultForObservation(toolResultEntry) {
   const empty = {
     output: null,
@@ -26168,16 +26186,13 @@ function getToolResultForObservation(toolResultEntry) {
   if (!toolResultEntry) {
     return empty;
   }
-  const outputRaw = toolResultEntry.content;
-  const outputStr = typeof outputRaw === "string" ? outputRaw : jsonDumps(outputRaw);
-  const [output] = truncateText(outputStr);
+  const output = toolOutputText(toolResultEntry.content);
   const resultTimestamp = parseTimestamp(toolResultEntry.timestamp);
   const finalOutputRaw = toolResultEntry.finalContent;
   if (finalOutputRaw === void 0 || finalOutputRaw === null) {
     return { output, resultTimestamp, finalOutput: null, finalResultTimestamp: null };
   }
-  const finalOutputStr = typeof finalOutputRaw === "string" ? finalOutputRaw : jsonDumps(finalOutputRaw);
-  const [finalOutput] = truncateText(finalOutputStr);
+  const finalOutput = toolOutputText(finalOutputRaw);
   const finalResultTimestamp = parseTimestamp(toolResultEntry.finalTimestamp);
   return { output, resultTimestamp, finalOutput, finalResultTimestamp };
 }
@@ -26255,7 +26270,7 @@ function emitSingleToolObservation(emitter, parentSpan, turn, assistantTimestamp
         readyTimestamp: toolResult.finalResultTimestamp
       });
     } else {
-      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp);
+      subagentEndTimestamp = emitSubagentObservations(emitter, toolSpan, subagent, toolUseTimestamp, subagentMap);
     }
   }
   const toolEndTimestamp = getLatestTimestamp(
@@ -26332,11 +26347,12 @@ function updatePendingSubagentDisplayStartAfterLaunchResponse(pendingSubagents, 
     }
   }
 }
-function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp) {
+function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp, subagentMap) {
   const p = subagent.path;
   if (typeof p !== "string") {
     return startTimestamp;
   }
+  const nestedSubagentMap = subagentMap ? Object.fromEntries(Object.entries(subagentMap).filter(([, s]) => s.path !== p)) : null;
   const rows = readSubagentJsonl(p);
   if (rows === null) {
     return startTimestamp;
@@ -26368,7 +26384,7 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   let latestEndTimestamp = subagentStartTimestamp;
   let previousStartTimestamp = subagentStartTimestamp;
   for (const turn of turns) {
-    const latestTurnTimestamp = emitTurnObservations(emitter, subagentSpan, turn, previousStartTimestamp, "Subagent LLM Call", null);
+    const latestTurnTimestamp = emitTurnObservations(emitter, subagentSpan, turn, previousStartTimestamp, "Subagent LLM Call", nestedSubagentMap);
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, latestTurnTimestamp);
     if (latestTurnTimestamp !== null) {
       previousStartTimestamp = latestTurnTimestamp;
@@ -26380,6 +26396,7 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
 }
 function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generationPrefix = "LLM Call", subagentMap = null) {
   const history = [buildUserMessage(turn.userMsg)];
+  let pendingInjectedMessages = [...turn.injectedMessages];
   let previousTimestamp = startTimestamp;
   let previousToolResults = [];
   let pendingAsyncToolResults = [];
@@ -26395,7 +26412,8 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
           emitter,
           readySubagent.parentSpan ?? parentSpan,
           readySubagent.subagent,
-          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp
+          readySubagent.displayStartTimestamp ?? readySubagent.startTimestamp,
+          subagentMap
         );
         latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
       }
@@ -26411,6 +26429,9 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
     if (assistantIndex > 0 && toolResultsForInput.length > 0) {
       history.push(buildToolResultMessage(toolResultsForInput));
     }
+    const [readyInjected, laterInjected] = partitionReady(pendingInjectedMessages, (row) => parseTimestamp(row), assistantTimestamp);
+    pendingInjectedMessages = laterInjected;
+    history.push(...readyInjected.map(buildUserMessage));
     const [generationAttrs, toolUses, outputMessage] = buildGenerationAttributes(history, assistantMessage);
     history.push(outputMessage);
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
@@ -26448,7 +26469,8 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       emitter,
       pendingSubagent.parentSpan ?? parentSpan,
       pendingSubagent.subagent,
-      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp
+      pendingSubagent.displayStartTimestamp ?? pendingSubagent.startTimestamp,
+      subagentMap
     );
     latestEndTimestamp = getLatestTimestamp(latestEndTimestamp, subagentEndTimestamp);
   }

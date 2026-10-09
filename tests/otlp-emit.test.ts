@@ -322,6 +322,74 @@ describe("incomplete trailing turn (flush race)", () => {
   });
 });
 
+describe("background agent reporting back to a deferred turn", () => {
+  let dir: string | null = null;
+  afterEach(() => {
+    process.env.CC_LMNR_STATE_DIR = BASELINE_STATE_DIR;
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    }
+  });
+
+  it("keeps Claude's reply to the agent's message in the turn, with the message as its input", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-bg-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const append = (rows: any[]) => fs.appendFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const runStop = async (finalAssistantText: string) => {
+      const emitter = makeEmitter();
+      const n = await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        finalAssistantText,
+        exportFn: async () => true,
+      });
+      return [n, emitter] as const;
+    };
+
+    // The turn launches a background agent and ends; it is deferred until the
+    // agent's task-notification arrives.
+    append([
+      userRow("count words in the background", "2026-07-08T10:00:00.000Z"),
+      assistantRow([{ type: "tool_use", id: "tu_bg", name: "Agent", input: { prompt: "count", run_in_background: true } }], {
+        msgId: "m1",
+        ts: "2026-07-08T10:00:01.000Z",
+      }),
+      toolResultRow("tu_bg", "Async agent launched successfully", "2026-07-08T10:00:02.000Z", {
+        toolUseResult: { status: "async_launched" },
+      }),
+      assistantRow([{ type: "text", text: "Running in the background." }], { msgId: "m2", ts: "2026-07-08T10:00:03.000Z" }),
+    ]);
+    assert.equal((await runStop("Running in the background."))[0], 0);
+
+    // The agent reports back as an injected message, and Claude answers it — no
+    // new prompt in front of these rows.
+    append([
+      userRow("<agent-message>13 words</agent-message>", "2026-07-08T10:00:10.000Z", { isMeta: true }),
+      assistantRow([{ type: "text", text: "It has 13 words." }], { msgId: "m3", ts: "2026-07-08T10:00:11.000Z" }),
+    ]);
+    assert.equal((await runStop("It has 13 words."))[0], 0);
+
+    // The notification resolves the deferred turn, which now includes the reply.
+    append([
+      userRow(
+        "<task-notification><tool-use-id>tu_bg</tool-use-id><result>13 words</result></task-notification>",
+        "2026-07-08T10:00:12.000Z"
+      ),
+    ]);
+    const [emitted, emitter] = await runStop("");
+    assert.equal(emitted, 1);
+    const names = spansByName(emitter.spans);
+    const llm3 = names["LLM Call 3"];
+    assert.ok(llm3, "the reply to the agent's message is its own generation");
+    const input = JSON.parse(attrs(llm3)["gen_ai.input.messages"]);
+    assert.deepEqual(input[input.length - 1], {
+      role: "user",
+      content: [{ type: "text", text: "<agent-message>13 words</agent-message>" }],
+    });
+    assert.match(String(attrs(names["Claude Code - Turn 1 (sess)"]!)["lmnr.span.output"]), /13 words/);
+  });
+});
+
 describe("emitTurn", () => {
   const emit = (rows: any[], subagents: Record<string, SubagentTranscript> | null = null): TraceEmitter => {
     const emitter = makeEmitter();
@@ -390,6 +458,18 @@ describe("emitTurn", () => {
     assert.deepEqual(outMsgs[0].content, [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }]);
   });
 
+  it("tool span output replaces a returned image with a marker", () => {
+    const emitter = emit([
+      userRow("look at it"),
+      assistantRow([{ type: "tool_use", id: "tu_img", name: "Read", input: { file_path: "red.png" } }]),
+      toolResultRow("tu_img", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo" } }]),
+      assistantRow([{ type: "text", text: "red" }], { msgId: "m2", ts: "2026-07-08T10:00:15.000Z" }),
+    ]);
+    const output = attrs(spansByName(emitter.spans)["Read"]!)["lmnr.span.output"];
+    assert.ok(!String(output).includes("iVBORw0KGgo"));
+    assert.deepEqual(JSON.parse(JSON.parse(output)), [{ type: "text", text: "[image]" }]);
+  });
+
   it("timestamps backdated and ordered", () => {
     const emitter = emit([
       userRow("hello", "2026-07-08T10:00:00.000Z"),
@@ -453,6 +533,52 @@ describe("emitTurn", () => {
       assert.equal(subSpan.parentSpanId, toolSpan.spanContext().spanId);
       assert.equal(subLlm.parentSpanId, subSpan.spanContext().spanId);
       assert.equal(attrs(subSpan)["claude_code.subagent.type"], "Explore");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("nested subagent nests under its parent subagent's tool span", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-nested-"));
+    try {
+      const write = (name: string, rows: any[]) => {
+        const p = path.join(dir, name);
+        fs.writeFileSync(p, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+        return p;
+      };
+      const outerPath = write("agent-outer.jsonl", [
+        userRow("launch a nested one", "2026-07-08T10:00:06.000Z"),
+        assistantRow([{ type: "tool_use", id: "tu_inner", name: "Agent", input: { prompt: "read" } }], {
+          msgId: "om1",
+          ts: "2026-07-08T10:00:07.000Z",
+        }),
+        toolResultRow("tu_inner", "first line", "2026-07-08T10:00:09.000Z"),
+        assistantRow([{ type: "text", text: "nested said: first line" }], { msgId: "om2", ts: "2026-07-08T10:00:10.000Z" }),
+      ]);
+      const innerPath = write("agent-inner.jsonl", [
+        userRow("read", "2026-07-08T10:00:07.500Z"),
+        assistantRow([{ type: "text", text: "first line" }], { msgId: "im1", ts: "2026-07-08T10:00:08.000Z" }),
+      ]);
+      const subagents: Record<string, SubagentTranscript> = {
+        tu_outer: { path: outerPath, agentId: "outer", agentType: "general-purpose", description: "outer" },
+        tu_inner: { path: innerPath, agentId: "inner", agentType: "general-purpose", description: "inner" },
+      };
+      const emitter = emit(
+        [
+          userRow("delegate"),
+          assistantRow([{ type: "tool_use", id: "tu_outer", name: "Agent", input: { prompt: "go" } }]),
+          toolResultRow("tu_outer", "nested said: first line", "2026-07-08T10:00:11.000Z"),
+          assistantRow([{ type: "text", text: "done" }], { msgId: "m2", ts: "2026-07-08T10:00:12.000Z" }),
+        ],
+        subagents
+      );
+      const byName = (name: string) => emitter.spans.filter((s) => s.name === name);
+      const outer = byName("Subagent: outer")[0]!;
+      const inner = byName("Subagent: inner")[0]!;
+      const innerTool = byName("Agent").find((s) => s.parentSpanId === outer.spanContext().spanId)!;
+      assert.ok(innerTool, "the outer subagent's Agent call has a tool span under it");
+      assert.equal(inner.parentSpanId, innerTool.spanContext().spanId);
+      assert.equal(byName("Subagent: outer").length, 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
