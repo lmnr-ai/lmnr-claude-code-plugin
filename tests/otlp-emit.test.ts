@@ -353,10 +353,12 @@ describe("emitTurn", () => {
     assert.equal(llmAttrs["gen_ai.request.model"], "claude-opus-4-7");
     assert.equal(llmAttrs["gen_ai.usage.input_tokens"], 10);
     assert.equal(llmAttrs["gen_ai.usage.output_tokens"], 5);
-    assert.deepEqual(JSON.parse(llmAttrs["gen_ai.input.messages"]), [{ role: "user", content: "hello" }]);
+    assert.deepEqual(JSON.parse(llmAttrs["gen_ai.input.messages"]), [
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ]);
     const outMsgs = JSON.parse(llmAttrs["gen_ai.output.messages"]);
     assert.equal(outMsgs[0].role, "assistant");
-    assert.equal(outMsgs[0].content, "hi");
+    assert.deepEqual(outMsgs[0].content, [{ type: "text", text: "hi" }]);
   });
 
   it("tool turn spans", () => {
@@ -374,14 +376,18 @@ describe("emitTurn", () => {
     assert.deepEqual(JSON.parse(toolAttrs["lmnr.span.input"]), { command: "ls" });
     assert.deepEqual(JSON.parse(toolAttrs["lmnr.span.output"]), "file.txt");
 
+    // LLM Call 2 sees the whole turn so far, in Anthropic Messages API shape:
+    // the prompt, the tool_use it answered, and the tool_result in a user message.
     const llm2Attrs = attrs(names["LLM Call 2"]!);
-    const inMsgs = JSON.parse(llm2Attrs["gen_ai.input.messages"]);
-    assert.equal(inMsgs[0].role, "tool");
-    assert.equal(inMsgs[0].tool_call_id, "tu_1");
+    assert.deepEqual(JSON.parse(llm2Attrs["gen_ai.input.messages"]), [
+      { role: "user", content: [{ type: "text", text: "run ls" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "file.txt" }] },
+    ]);
 
     const llm1Attrs = attrs(names["LLM Call 1"]!);
     const outMsgs = JSON.parse(llm1Attrs["gen_ai.output.messages"]);
-    assert.equal(outMsgs[0].tool_calls[0].name, "Bash");
+    assert.deepEqual(outMsgs[0].content, [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }]);
   });
 
   it("timestamps backdated and ordered", () => {
@@ -533,14 +539,16 @@ describe("emitTurn", () => {
 
       // The generation right after launch sees the initial launch text; the async
       // result is folded only into the generation after the notification resolves.
+      const lastResult = (messages: any[]) => messages[messages.length - 1].content[0];
       const llm2In = JSON.parse(attrs(names["LLM Call 2"]!)["gen_ai.input.messages"]);
-      assert.equal(llm2In[0].tool_call_id, "tu_task");
-      assert.ok(String(llm2In[0].content).includes("Async agent launched"));
-      assert.ok(!String(llm2In[0].content).includes("async task result"));
+      assert.equal(lastResult(llm2In).tool_use_id, "tu_task");
+      assert.ok(String(lastResult(llm2In).content).includes("Async agent launched"));
+      assert.ok(!JSON.stringify(llm2In).includes("async task result"));
 
       const llm3In = JSON.parse(attrs(names["LLM Call 3"]!)["gen_ai.input.messages"]);
-      assert.equal(llm3In[0].tool_call_id, "tu_task");
-      assert.ok(String(llm3In[0].content).includes("async task result"));
+      assert.equal(llm3In.length, 5); // prompt, launch, launch result, "working on it", async result
+      assert.equal(lastResult(llm3In).tool_use_id, "tu_task");
+      assert.ok(String(lastResult(llm3In).content).includes("async task result"));
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

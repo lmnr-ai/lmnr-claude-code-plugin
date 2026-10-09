@@ -24,6 +24,7 @@ import type { Json, Row } from "./types.js";
 export interface ToolResultEntry {
   content: Json;
   timestamp?: Json;
+  isError?: boolean;
   isAsyncLaunch?: boolean;
   finalContent?: Json;
   finalTimestamp?: Json;
@@ -176,6 +177,9 @@ function addToolResultRow(row: Row, state: TurnAssemblyState): boolean {
     const toolUseId = toolResultBlock.tool_use_id;
     if (toolUseId) {
       const entry: ToolResultEntry = { content: toolResultBlock.content, timestamp: rowTimestamp };
+      if (toolResultBlock.is_error === true) {
+        entry.isError = true;
+      }
       if (isAsyncLaunch !== null) {
         entry.isAsyncLaunch = isAsyncLaunch;
       }

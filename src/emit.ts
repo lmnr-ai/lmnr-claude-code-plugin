@@ -9,7 +9,7 @@ import {
 import { ASSOC_PREFIX, SPAN_OUTPUT_ATTR, startSpan, TraceEmitter, type SpanHandle } from "./tracer.js";
 import { buildTurns, type ToolResultEntry, type Turn } from "./turns.js";
 import { readSubagentJsonl, type SubagentTranscript } from "./subagents.js";
-import { buildGenerationAttributes, type GenerationToolResult } from "./genai.js";
+import { buildGenerationAttributes, buildToolResultMessage, buildUserMessage, type GenerationToolResult } from "./genai.js";
 import type { Json, Row } from "./types.js";
 import { getLatestTimestamp, jsonDumps } from "./util.js";
 
@@ -246,13 +246,13 @@ function emitSingleToolObservation(
   if (toolResult.finalResultTimestamp !== null && toolResult.finalOutput !== null) {
     pendingAsyncToolResults.push({
       timestamp: toolResult.finalResultTimestamp,
-      toolResult: { toolUseId, toolName, output: toolResult.finalOutput },
+      toolResult: { toolUseId, content: toolResultEntry!.finalContent ?? null },
     });
   }
 
   return {
     handoffTimestamp,
-    toolResult: { toolUseId, toolName, output: toolResult.output },
+    toolResult: { toolUseId, content: toolResultEntry?.content ?? null, isError: toolResultEntry?.isError },
     latestEndTimestamp: getLatestTimestamp(toolEndTimestamp, subagentEndTimestamp),
   };
 }
@@ -401,7 +401,9 @@ function emitTurnObservations(
   generationPrefix = "LLM Call",
   subagentMap: Record<string, SubagentTranscript> | null = null
 ): Date | null {
-  const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
+  // The turn's messages so far, in Anthropic Messages API shape: each
+  // generation's input is the history up to it.
+  const history: Row[] = [buildUserMessage(turn.userMsg)];
   let previousTimestamp = startTimestamp;
   let previousToolResults: GenerationToolResult[] = [];
   let pendingAsyncToolResults: PendingAsyncToolResult[] = [];
@@ -432,13 +434,12 @@ function emitTurnObservations(
       previousTimestamp = getLatestTimestamp(previousTimestamp, ...ready.map((r) => r.timestamp));
     }
 
-    const [generationAttrs, toolUses] = buildGenerationAttributes(
-      assistantIndex,
-      assistantMessage,
-      userText,
-      previousToolResults,
-      readyAsyncToolResults.map((r) => r.toolResult)
-    );
+    const toolResultsForInput = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
+    if (assistantIndex > 0 && toolResultsForInput.length > 0) {
+      history.push(buildToolResultMessage(toolResultsForInput));
+    }
+    const [generationAttrs, toolUses, outputMessage] = buildGenerationAttributes(history, assistantMessage);
+    history.push(outputMessage);
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
       name: `${generationPrefix} ${assistantIndex + 1}`,

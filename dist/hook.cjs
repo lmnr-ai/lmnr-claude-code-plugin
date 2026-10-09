@@ -25867,10 +25867,13 @@ function addToolResultRow(row, state) {
   state.currentRows.push(row);
   const rowTimestamp = row.timestamp;
   const isAsyncLaunch = getAsyncLaunchFlagFromRow(row);
-  for (const toolResultBlock of getToolResultBlocks(getContentFromRow(row))) {
-    const toolUseId = toolResultBlock.tool_use_id;
+  for (const toolResultBlock2 of getToolResultBlocks(getContentFromRow(row))) {
+    const toolUseId = toolResultBlock2.tool_use_id;
     if (toolUseId) {
-      const entry = { content: toolResultBlock.content, timestamp: rowTimestamp };
+      const entry = { content: toolResultBlock2.content, timestamp: rowTimestamp };
+      if (toolResultBlock2.is_error === true) {
+        entry.isError = true;
+      }
       if (isAsyncLaunch !== null) {
         entry.isAsyncLaunch = isAsyncLaunch;
       }
@@ -26022,46 +26025,87 @@ function readSubagentJsonl(filePath) {
 }
 
 // src/genai.ts
-function buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults) {
-  if (assistantIndex === 0) {
-    return [{ role: "user", content: userText }];
+function truncateStrings(value) {
+  if (typeof value === "string") {
+    return truncateText(value)[0];
   }
-  const toolResults = [...previousToolResults, ...readyToolResults];
-  if (toolResults.length > 0) {
-    return toolResults.map((toolResult) => ({
-      role: "tool",
-      content: jsonDumps(toolResult.output),
-      tool_call_id: toolResult.toolUseId,
-      name: toolResult.toolName
-    }));
+  if (Array.isArray(value)) {
+    return value.map(truncateStrings);
   }
-  return null;
+  if (typeof value === "object" && value !== null) {
+    const out = {};
+    for (const [key, inner] of Object.entries(value)) {
+      out[key] = truncateStrings(inner);
+    }
+    return out;
+  }
+  return value;
 }
-function buildGenerationOutputMessage(assistantText, toolUses) {
-  const output = { role: "assistant", content: assistantText || "" };
-  if (toolUses.length > 0) {
-    output.tool_calls = toolUses.map((toolUse) => ({
-      id: toolUse.id,
-      name: toolUse.name,
-      arguments: typeof toolUse.input === "object" && toolUse.input !== null && !Array.isArray(toolUse.input) ? toolUse.input : {}
-    }));
+function toAnthropicBlock(block) {
+  if (typeof block === "string") {
+    return block ? { type: "text", text: truncateText(block)[0] } : null;
   }
-  return output;
+  if (typeof block !== "object" || block === null || Array.isArray(block)) {
+    return null;
+  }
+  switch (block.type) {
+    case "text":
+      return block.text ? { type: "text", text: truncateText(String(block.text))[0] } : null;
+    case "thinking":
+      return block.thinking ? { type: "thinking", thinking: truncateText(String(block.thinking))[0] } : null;
+    case "redacted_thinking":
+      return { type: "redacted_thinking", data: "" };
+    case "tool_use":
+      return { type: "tool_use", id: String(block.id ?? ""), name: String(block.name ?? ""), input: truncateStrings(block.input ?? {}) };
+    case "tool_result":
+      return toolResultBlock(String(block.tool_use_id ?? ""), block.content, block.is_error === true);
+    case "image":
+      return { type: "text", text: "[image]" };
+    case "document":
+      return { type: "text", text: "[document]" };
+    default:
+      return truncateStrings(block);
+  }
 }
-function buildGenerationAttributes(assistantIndex, assistantMessage, userText, previousToolResults, readyToolResults) {
-  const [assistantText] = truncateText(extractTextFromContent(getContentFromRow(assistantMessage)));
-  const toolUses = getToolUseBlocks(getContentFromRow(assistantMessage));
+function toAnthropicContent(content) {
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks.map(toAnthropicBlock).filter((b) => b !== null);
+}
+function toolResultBlock(toolUseId, content, isError) {
+  const block = {
+    type: "tool_result",
+    tool_use_id: toolUseId,
+    content: typeof content === "string" ? truncateText(content)[0] : toAnthropicContent(content ?? "")
+  };
+  if (isError) {
+    block.is_error = true;
+  }
+  return block;
+}
+function buildUserMessage(userRow) {
+  return { role: "user", content: toAnthropicContent(getContentFromRow(userRow)) };
+}
+function buildToolResultMessage(toolResults) {
+  return {
+    role: "user",
+    content: toolResults.map((r) => toolResultBlock(r.toolUseId, r.content, r.isError === true))
+  };
+}
+function buildGenerationAttributes(history, assistantMessage) {
+  const content = getContentFromRow(assistantMessage);
+  const toolUses = getToolUseBlocks(content);
+  const outputMessage = { role: "assistant", content: toAnthropicContent(content) };
   const model = getModel(assistantMessage);
   const attrs = {
     "gen_ai.system": "anthropic",
     "gen_ai.request.model": model,
-    "gen_ai.response.model": model
+    "gen_ai.response.model": model,
+    "gen_ai.input.messages": jsonDumps(history)
   };
-  const inputMessages = buildGenerationInputMessages(assistantIndex, userText, previousToolResults, readyToolResults);
-  if (inputMessages !== null) {
-    attrs["gen_ai.input.messages"] = jsonDumps(inputMessages);
-  }
-  attrs["gen_ai.output.messages"] = jsonDumps([buildGenerationOutputMessage(assistantText, toolUses)]);
+  const stopReason = assistantMessage.message?.stop_reason;
+  attrs["gen_ai.output.messages"] = jsonDumps([
+    typeof stopReason === "string" ? { ...outputMessage, stop_reason: stopReason } : outputMessage
+  ]);
   const usageDetails = getUsageDetailsFromRow(assistantMessage);
   if (usageDetails !== null) {
     let total = 0;
@@ -26071,7 +26115,7 @@ function buildGenerationAttributes(assistantIndex, assistantMessage, userText, p
     }
     attrs["llm.usage.total_tokens"] = total;
   }
-  return [attrs, toolUses];
+  return [attrs, toolUses, outputMessage];
 }
 
 // src/emit.ts
@@ -26225,12 +26269,12 @@ function emitSingleToolObservation(emitter, parentSpan, turn, assistantTimestamp
   if (toolResult.finalResultTimestamp !== null && toolResult.finalOutput !== null) {
     pendingAsyncToolResults.push({
       timestamp: toolResult.finalResultTimestamp,
-      toolResult: { toolUseId, toolName, output: toolResult.finalOutput }
+      toolResult: { toolUseId, content: toolResultEntry.finalContent ?? null }
     });
   }
   return {
     handoffTimestamp,
-    toolResult: { toolUseId, toolName, output: toolResult.output },
+    toolResult: { toolUseId, content: toolResultEntry?.content ?? null, isError: toolResultEntry?.isError },
     latestEndTimestamp: getLatestTimestamp(toolEndTimestamp, subagentEndTimestamp)
   };
 }
@@ -26335,7 +26379,7 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   return latestEndTimestamp;
 }
 function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generationPrefix = "LLM Call", subagentMap = null) {
-  const [userText] = truncateText(extractTextFromContent(getContentFromRow(turn.userMsg)));
+  const history = [buildUserMessage(turn.userMsg)];
   let previousTimestamp = startTimestamp;
   let previousToolResults = [];
   let pendingAsyncToolResults = [];
@@ -26363,13 +26407,12 @@ function emitTurnObservations(emitter, parentSpan, turn, startTimestamp, generat
       pendingAsyncToolResults = stillPending;
       previousTimestamp = getLatestTimestamp(previousTimestamp, ...ready.map((r) => r.timestamp));
     }
-    const [generationAttrs, toolUses] = buildGenerationAttributes(
-      assistantIndex,
-      assistantMessage,
-      userText,
-      previousToolResults,
-      readyAsyncToolResults.map((r) => r.toolResult)
-    );
+    const toolResultsForInput = [...previousToolResults, ...readyAsyncToolResults.map((r) => r.toolResult)];
+    if (assistantIndex > 0 && toolResultsForInput.length > 0) {
+      history.push(buildToolResultMessage(toolResultsForInput));
+    }
+    const [generationAttrs, toolUses, outputMessage] = buildGenerationAttributes(history, assistantMessage);
+    history.push(outputMessage);
     const generationStartTimestamp = previousTimestamp ?? assistantTimestamp;
     const generationSpan = startSpan(emitter, {
       name: `${generationPrefix} ${assistantIndex + 1}`,
