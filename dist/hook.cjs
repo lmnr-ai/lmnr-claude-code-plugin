@@ -26137,6 +26137,20 @@ function getToolResultForObservation(toolResultEntry) {
   const finalResultTimestamp = parseTimestamp(toolResultEntry.finalTimestamp);
   return { output, resultTimestamp, finalOutput, finalResultTimestamp };
 }
+function getSubagentReport(lastAssistant) {
+  const content = lastAssistant ? getContentFromRow(lastAssistant) : "";
+  const text = extractTextFromContent(content);
+  if (text) {
+    return text;
+  }
+  for (const toolUse of getToolUseBlocks(content)) {
+    const message = toolUse.input?.message;
+    if (toolUse.name === "SubagentHandback" && typeof message === "string") {
+      return message;
+    }
+  }
+  return "";
+}
 function getShortTranscriptPathForMetadata(p) {
   if (typeof p === "string" && p) {
     const parts = p.split(/[/\\]/);
@@ -26292,7 +26306,7 @@ function emitSubagentObservations(emitter, parentSpan, subagent, startTimestamp)
   const [subagentInputText] = truncateText(extractTextFromContent(getContentFromRow(firstTurn.userMsg)));
   const lastTurn = turns[turns.length - 1];
   const lastAssistant = lastTurn.assistantMsgs[lastTurn.assistantMsgs.length - 1];
-  const [subagentOutputText] = truncateText(extractTextFromContent(lastAssistant ? getContentFromRow(lastAssistant) : ""));
+  const [subagentOutputText] = truncateText(getSubagentReport(lastAssistant));
   const description = subagent.description;
   const subagentName = typeof description === "string" && description ? `Subagent: ${description}` : "Subagent";
   const subagentAttrs = {};

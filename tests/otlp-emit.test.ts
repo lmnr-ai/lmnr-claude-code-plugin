@@ -452,6 +452,39 @@ describe("emitTurn", () => {
     }
   });
 
+  it("subagent output falls back to its SubagentHandback report", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-sub-"));
+    try {
+      const subJsonl = path.join(dir, "agent-hb.jsonl");
+      const subRows = [
+        userRow("count words", "2026-07-08T10:00:06.000Z"),
+        assistantRow([{ type: "tool_use", id: "hb", name: "SubagentHandback", input: { message: "14 words" } }], {
+          msgId: "sm1",
+          ts: "2026-07-08T10:00:08.000Z",
+        }),
+        toolResultRow("hb", "Report delivered to your caller.", "2026-07-08T10:00:08.500Z"),
+      ];
+      fs.writeFileSync(subJsonl, subRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+
+      const subagents: Record<string, SubagentTranscript> = {
+        tu_task: { path: subJsonl, agentId: "hb", agentType: "general-purpose", description: "count" },
+      };
+      const emitter = emit(
+        [
+          userRow("delegate"),
+          assistantRow([{ type: "tool_use", id: "tu_task", name: "Agent", input: { prompt: "go" } }]),
+          toolResultRow("tu_task", "14 words", "2026-07-08T10:00:09.000Z"),
+          assistantRow([{ type: "text", text: "14" }], { msgId: "m2", ts: "2026-07-08T10:00:10.000Z" }),
+        ],
+        subagents
+      );
+      const subSpan = spansByName(emitter.spans)["Subagent: count"]!;
+      assert.equal(JSON.parse(attrs(subSpan)["lmnr.span.output"]).content, "14 words");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("async subagent + async tool result render on the resolving generation", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-async-"));
     try {
