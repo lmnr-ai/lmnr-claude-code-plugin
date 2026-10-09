@@ -26633,7 +26633,7 @@ function emitReadyTurns(emitter, config, sessionId, transcriptPath, turnsToEmit,
   }
   return emitted;
 }
-function splitTrailingIncompleteTurn(rows) {
+function splitTrailingIncompleteTurn(rows, finalAssistantText = "") {
   let lastUserIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -26648,13 +26648,28 @@ function splitTrailingIncompleteTurn(rows) {
     return [rows, []];
   }
   const tail = rows.slice(lastUserIdx);
-  const tailHasAssistant = tail.some((r) => getUserOrAssistantRoleFromRow(r) === "assistant");
-  if (tailHasAssistant) {
-    return [rows, []];
+  const hold = [rows.slice(0, lastUserIdx), tail];
+  const assistantRows = [];
+  for (const row of tail) {
+    if (isToolResult(row)) {
+      assistantRows.length = 0;
+    } else if (getUserOrAssistantRoleFromRow(row) === "assistant") {
+      assistantRows.push(row);
+    }
   }
-  return [rows.slice(0, lastUserIdx), tail];
+  if (assistantRows.length === 0) {
+    return hold;
+  }
+  const want = finalAssistantText.trim();
+  if (want && !assistantRows.some((row) => {
+    const text = extractTextFromContent(getContentFromRow(row)).trim();
+    return text !== "" && want.endsWith(text);
+  })) {
+    return hold;
+  }
+  return [rows, []];
 }
-function getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns = false) {
+function getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns = false, finalAssistantText = "") {
   let rows;
   [rows, sessionState] = readNewJsonl(transcriptPath, sessionState, flushDeferredAgentTurns);
   if (sessionState.pendingTurnRows.length > 0) {
@@ -26664,7 +26679,7 @@ function getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, fl
   const taskIdToToolUseId = getTaskIdToToolUseId(subagentMap);
   let [deferredTurnRowLists, remainingRows] = resolveDeferredAgentTurns(rows, sessionState, taskIdToToolUseId);
   if (!flushDeferredAgentTurns) {
-    const [keep, hold] = splitTrailingIncompleteTurn(remainingRows);
+    const [keep, hold] = splitTrailingIncompleteTurn(remainingRows, finalAssistantText);
     sessionState.pendingTurnRows = hold;
     remainingRows = keep;
   }
@@ -26700,7 +26715,13 @@ async function emitNewTurnsFromTranscript(emitter, config, sessionId, transcript
       debug(`Discovered ${Object.keys(subagentMap).length} subagent transcript(s)`);
     }
     let turns;
-    [turns, sessionState] = getNewTurnsFromTranscript(transcriptPath, sessionState, subagentMap, flushDeferredAgentTurns);
+    [turns, sessionState] = getNewTurnsFromTranscript(
+      transcriptPath,
+      sessionState,
+      subagentMap,
+      flushDeferredAgentTurns,
+      opts.finalAssistantText ?? ""
+    );
     if (turns.length === 0) {
       saveSessionState(state, key, sessionState);
       return 0;
@@ -26796,8 +26817,10 @@ async function main() {
   const flushDeferredAgentTurns = isSessionEndHookPayload(payload);
   const emitter = new TraceEmitter(config);
   try {
+    const lastAssistantMessage = payload.last_assistant_message;
     const emitted = await emitNewTurnsFromTranscript(emitter, config, sessionId, transcriptPath, {
-      flushDeferredAgentTurns
+      flushDeferredAgentTurns,
+      finalAssistantText: typeof lastAssistantMessage === "string" ? lastAssistantMessage : ""
     });
     const dur = (Date.now() - start) / 1e3;
     info(`Processed ${emitted} turns in ${dur.toFixed(2)}s (session=${sessionId})`);

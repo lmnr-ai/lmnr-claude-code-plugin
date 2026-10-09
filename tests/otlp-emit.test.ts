@@ -254,6 +254,72 @@ describe("incomplete trailing turn (flush race)", () => {
     assert.equal(saved().turnCount, 1);
     assert.equal(saved().pendingTurnRows.length, 0);
   });
+
+  it("holds a turn ending in a tool_result on Stop and emits it with its final answer", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-race-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const key = getSessionStateKey("sess", transcript);
+    const saved = () => getSessionState(loadHookState(), key);
+    const runHook = async (event: "Stop" | "SessionEnd") => {
+      const emitter = makeEmitter();
+      const n = await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        flushDeferredAgentTurns: event === "SessionEnd",
+        exportFn: async () => true,
+      });
+      return [n, emitter] as const;
+    };
+
+    // Stop fires after the tool ran but before the final answer is written.
+    const rows = [
+      userRow("read it"),
+      assistantRow([{ type: "tool_use", id: "t1", name: "Read", input: { file_path: "a" } }], { msgId: "m1" }),
+      toolResultRow("t1", "contents"),
+    ];
+    fs.writeFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const [heldCount] = await runHook("Stop");
+    assert.equal(heldCount, 0);
+    assert.equal(saved().pendingTurnRows.length, 3); // held, not emitted without its ending
+
+    // The final answer lands; the next run emits the whole turn.
+    fs.appendFileSync(transcript, JSON.stringify(assistantRow([{ type: "text", text: "done" }], { msgId: "m2", ts: "2026-07-08T10:00:12.000Z" })) + "\n");
+    const [emittedCount, emitter] = await runHook("SessionEnd");
+    assert.equal(emittedCount, 1);
+    const spans = spansByName(emitter.spans);
+    assert.ok(spans["LLM Call 2"]);
+    assert.match(String(attrs(spans["Claude Code - Turn 1 (sess)"]!)["lmnr.span.output"]), /done/);
+  });
+
+  it("holds a turn on Stop until the text the payload names is written", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-race-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const key = getSessionStateKey("sess", transcript);
+    const saved = () => getSessionState(loadHookState(), key);
+    const runStop = async (finalAssistantText: string) => {
+      const emitter = makeEmitter();
+      const n = await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        finalAssistantText,
+        exportFn: async () => true,
+      });
+      return [n, emitter] as const;
+    };
+
+    // Stop fires with the final message's thinking row written but not its text row.
+    const rows = [userRow("hi"), assistantRow([{ type: "thinking", thinking: "hmm" }], { msgId: "m1" })];
+    fs.writeFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const [heldCount] = await runStop("All done.");
+    assert.equal(heldCount, 0);
+    assert.equal(saved().pendingTurnRows.length, 2);
+
+    // The text row lands; the next Stop (whose payload names the next turn's
+    // text) emits the held turn whole.
+    fs.appendFileSync(transcript, JSON.stringify(assistantRow([{ type: "text", text: "All done." }], { msgId: "m1" })) + "\n");
+    const [emittedCount, emitter] = await runStop("All done.");
+    assert.equal(emittedCount, 1);
+    assert.match(String(attrs(spansByName(emitter.spans)["Claude Code - Turn 1 (sess)"]!)["lmnr.span.output"]), /All done\./);
+    assert.equal(saved().pendingTurnRows.length, 0);
+  });
 });
 
 describe("emitTurn", () => {

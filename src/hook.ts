@@ -118,8 +118,10 @@ async function main(): Promise<number> {
   const emitter = new TraceEmitter(config);
 
   try {
+    const lastAssistantMessage = payload.last_assistant_message;
     const emitted = await emitNewTurnsFromTranscript(emitter, config, sessionId, transcriptPath, {
       flushDeferredAgentTurns,
+      finalAssistantText: typeof lastAssistantMessage === "string" ? lastAssistantMessage : "",
     });
     const dur = (Date.now() - start) / 1000;
     info(`Processed ${emitted} turns in ${dur.toFixed(2)}s (session=${sessionId})`);
