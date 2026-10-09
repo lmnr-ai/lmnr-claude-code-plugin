@@ -19,6 +19,9 @@ Each trace contains:
 - subagent activity, read from the subagent transcripts Claude Code writes
   next to the session transcript
 - the model name and token usage of each LLM call
+- the definitions of the tools offered to each LLM call: Claude Code's
+  built-in tools and the tools of the MCP servers you have configured (names,
+  descriptions and input schemas)
 - session metadata: session id, turn number, operating system, working
   directory, git branch, Claude Code version, the transcript file's name, and
   the names of skills used in the turn
