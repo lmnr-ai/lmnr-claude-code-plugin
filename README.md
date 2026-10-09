@@ -1,6 +1,38 @@
 # Laminar plugin for Claude Code
 
-Trace your [Claude Code](https://claude.com/claude-code) sessions in [Laminar](https://www.lmnr.ai).
+Trace your [Claude Code](https://claude.com/claude-code) sessions in [Laminar](https://laminar.sh).
+
+## What the plugin sends, and where
+
+The plugin does nothing until you configure a Laminar project API key (see
+[Installation](#installation)). Once a key is set, it runs on Claude Code's
+`Stop` and `SessionEnd` hooks in every session. Each time, it reads the new part
+of the session transcript and sends the completed turns to your Laminar project
+as OpenTelemetry traces. They go to `https://api.lmnr.ai`, or to the `baseUrl`
+you configure for a self-hosted Laminar.
+
+Each trace contains:
+
+- your prompt and Claude's text responses
+- every tool call, with its input and output. Tool calls can include file
+  contents, command output, and fetched web pages
+- subagent activity, read from the subagent transcripts Claude Code writes
+  next to the session transcript
+- the model name and token usage of each LLM call
+- session metadata: session id, turn number, operating system, working
+  directory, git branch, Claude Code version, the transcript file's name, and
+  the names of skills used in the turn
+- a user id: `LMNR_USER_ID` if you set it; otherwise, if you've logged in with
+  `lmnr-cli`, the email address (or user id) stored in
+  `~/.config/lmnr/credentials.json`
+
+The plugin caps each text field at 20,000 characters (`CC_LMNR_MAX_CHARS`). It
+sends data only to the Laminar endpoint above: no analytics or other
+third-party calls. Laminar stores the traces in your project under the
+[Laminar privacy policy](https://laminar.sh/policies/privacy).
+
+To stop sending traces, disable the plugin (`claude plugin disable lmnr@lmnr`)
+or delete `~/.config/lmnr/claude-code-plugin.json`.
 
 ## Installation
 
@@ -22,7 +54,7 @@ Claude Code's own plugin commands, then create the config file yourself.
 
    ```
    claude plugin marketplace add lmnr-ai/lmnr-claude-code-plugin
-   claude plugin install laminar@laminar --scope user
+   claude plugin install lmnr@lmnr --scope user
    ```
 
 2. Create `~/.config/lmnr/claude-code-plugin.json` with a project API key. Get
