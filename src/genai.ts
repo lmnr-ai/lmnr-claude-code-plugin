@@ -103,11 +103,15 @@ export function buildToolResultMessage(toolResults: GenerationToolResult[]): Row
 
 /**
  * Build the `gen_ai.*` attribute payload for one assistant generation, given
- * the turn's messages so far. Returns the attributes, the tool_use blocks the
+ * the turn's messages so far and the tools it was offered. Returns the attributes, the tool_use blocks the
  * renderer needs for tool spans, and the assistant message to append to the
  * history for the next generation.
  */
-export function buildGenerationAttributes(history: Row[], assistantMessage: Row): [Record<string, Json>, Row[], Row] {
+export function buildGenerationAttributes(
+  history: Row[],
+  assistantMessage: Row,
+  toolDefinitions: Row[] | null = null
+): [Record<string, Json>, Row[], Row] {
   const content = getContentFromRow(assistantMessage);
   const toolUses = getToolUseBlocks(content);
   const outputMessage: Row = { role: "assistant", content: toAnthropicContent(content) };
@@ -119,6 +123,9 @@ export function buildGenerationAttributes(history: Row[], assistantMessage: Row)
     "gen_ai.response.model": model,
     "gen_ai.input.messages": jsonDumps(history),
   };
+  if (toolDefinitions !== null && toolDefinitions.length > 0) {
+    attrs["gen_ai.tool.definitions"] = jsonDumps(toolDefinitions);
+  }
 
   const stopReason = assistantMessage.message?.stop_reason;
   attrs["gen_ai.output.messages"] = jsonDumps([

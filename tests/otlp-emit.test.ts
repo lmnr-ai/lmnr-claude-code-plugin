@@ -23,7 +23,7 @@ import {
 import type { SubagentTranscript } from "../src/subagents.js";
 import { TraceEmitter } from "../src/tracer.js";
 import { buildTurns, type Turn } from "../src/turns.js";
-import { assistantRow, spansByName, toolResultRow, userRow } from "./helpers.js";
+import { assistantRow, promptSnapshotRow, spansByName, toolResultRow, userRow } from "./helpers.js";
 
 function makeEmitter(userId: string | null = null): TraceEmitter {
   const config: LaminarConfig = { apiKey: "k", baseUrl: "http://localhost:1", userId };
@@ -387,6 +387,91 @@ describe("background agent reporting back to a deferred turn", () => {
       content: [{ type: "text", text: "<agent-message>13 words</agent-message>" }],
     });
     assert.match(String(attrs(names["Claude Code - Turn 1 (sess)"]!)["lmnr.span.output"]), /13 words/);
+  });
+});
+
+describe("tool definitions on LLM spans", () => {
+  let dir: string | null = null;
+  afterEach(() => {
+    process.env.CC_LMNR_STATE_DIR = BASELINE_STATE_DIR;
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    }
+  });
+
+  const read = { name: "Read", description: "Reads a file", schema: { type: "object" } };
+  const toolNames = (span: ReadableSpan | undefined) =>
+    JSON.parse(attrs(span!)["gen_ai.tool.definitions"] ?? "[]").map((t: any) => t.name);
+
+  it("carries the recorded tool set into later hook runs that record none", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-tooldefs-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const append = (rows: any[]) => fs.appendFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const runStop = async (finalAssistantText: string) => {
+      const emitter = makeEmitter();
+      await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        finalAssistantText,
+        exportFn: async () => true,
+      });
+      return emitter;
+    };
+
+    append([
+      userRow("first", "2026-07-08T10:00:00.000Z"),
+      promptSnapshotRow([read], "2026-07-08T10:00:00.500Z"),
+      assistantRow([{ type: "text", text: "one" }], { msgId: "m1", ts: "2026-07-08T10:00:01.000Z" }),
+    ]);
+    const first = await runStop("one");
+    assert.deepEqual(toolNames(spansByName(first.spans)["LLM Call 1"]), ["Read"]);
+    assert.deepEqual(JSON.parse(attrs(spansByName(first.spans)["LLM Call 1"]!)["gen_ai.tool.definitions"])[0], {
+      name: "Read",
+      description: "Reads a file",
+      input_schema: { type: "object" },
+    });
+
+    // The next turn's rows have no snapshot: the set is unchanged.
+    append([
+      userRow("second", "2026-07-08T10:01:00.000Z"),
+      assistantRow([{ type: "text", text: "two" }], { msgId: "m2", ts: "2026-07-08T10:01:01.000Z" }),
+    ]);
+    const second = await runStop("two");
+    assert.deepEqual(toolNames(spansByName(second.spans)["LLM Call 1"]), ["Read"]);
+  });
+
+  it("gives a subagent's generations the tools from its own transcript", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-subtools-"));
+    try {
+      const subJsonl = path.join(tmp, "agent-t.jsonl");
+      const handback = { name: "SubagentHandback", description: "Report back", schema: { type: "object" } };
+      fs.writeFileSync(
+        subJsonl,
+        [
+          userRow("sub prompt", "2026-07-08T10:00:06.000Z"),
+          promptSnapshotRow([read, handback], "2026-07-08T10:00:06.500Z"),
+          assistantRow([{ type: "text", text: "sub answer" }], { msgId: "sm1", ts: "2026-07-08T10:00:08.000Z" }),
+        ]
+          .map((r) => JSON.stringify(r))
+          .join("\n") + "\n"
+      );
+      const emitter = makeEmitter();
+      const turns = buildTurns([
+        userRow("delegate"),
+        assistantRow([{ type: "tool_use", id: "tu_task", name: "Agent", input: { prompt: "go" } }]),
+        toolResultRow("tu_task", "done", "2026-07-08T10:00:09.000Z"),
+        assistantRow([{ type: "text", text: "summary" }], { msgId: "m2", ts: "2026-07-08T10:00:10.000Z" }),
+      ]);
+      emitTurn(emitter, emitter.config, "sess", 1, turns[0]!, "/tmp/t.jsonl", {
+        tu_task: { path: subJsonl, agentId: "t", agentType: "general-purpose", description: "sub" },
+      });
+      const names = spansByName(emitter.spans);
+      assert.deepEqual(toolNames(names["Subagent LLM Call 1"]), ["Read", "SubagentHandback"]);
+      // No tool timeline was given for the main session here.
+      assert.equal(attrs(names["LLM Call 1"]!)["gen_ai.tool.definitions"], undefined);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

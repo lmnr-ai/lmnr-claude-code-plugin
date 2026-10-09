@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import lockfile from "proper-lockfile";
 import { lockFile, stateDir, stateFile } from "./config.js";
 import { info } from "./logger.js";
+import { coerceToolSetChanges, type ToolSetChange } from "./tools.js";
 import type { Json, Row } from "./types.js";
 
 export type GlobalState = Record<string, any>;
@@ -65,6 +66,10 @@ export class SessionState {
   // it together with the response. Guards against the transcript being flushed
   // between the Stop hook firing and the assistant row landing.
   pendingTurnRows: Row[];
+  // When each tool set came into effect (sets themselves live in tools.ts's
+  // shared directory). Snapshots are written only on change, so later hook
+  // runs need this to know which tools a generation was offered.
+  toolSetChanges: ToolSetChange[];
 
   constructor(init: Partial<SessionState> = {}) {
     this.offset = init.offset ?? 0;
@@ -73,6 +78,7 @@ export class SessionState {
     this.pendingAgentTurns = init.pendingAgentTurns ?? [];
     this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
     this.pendingTurnRows = init.pendingTurnRows ?? [];
+    this.toolSetChanges = init.toolSetChanges ?? [];
   }
 
   /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
@@ -85,6 +91,7 @@ export class SessionState {
       pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
       pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
       pendingTurnRows: coerceRows(s.pendingTurnRows),
+      toolSetChanges: coerceToolSetChanges(s.toolSetChanges),
     });
   }
 
@@ -97,6 +104,7 @@ export class SessionState {
       pendingAgentTurns: this.pendingAgentTurns as unknown as Json,
       pendingTaskNotifications: this.pendingTaskNotifications as unknown as Json,
       pendingTurnRows: this.pendingTurnRows as unknown as Json,
+      toolSetChanges: this.toolSetChanges as unknown as Json,
     };
   }
 }
