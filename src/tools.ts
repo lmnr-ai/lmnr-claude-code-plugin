@@ -1,27 +1,13 @@
 /**
- * Tool definitions for LLM spans.
- *
- * The transcript records the tools Claude Code sends to the API in internal,
- * undocumented `attachment` rows:
- *  - `prompt_snapshot`: `tools` holds the inline tools as {name, description,
- *    schema}. It is written only when the set changes, and is null on a
- *    transcript's first request.
- *  - `deferred_tools_record`: `entries` holds full definitions of deferred tools
- *    (MCP tools and some built-ins) once ToolSearch has loaded them.
- *
- * A ToolTimeline turns these rows into "the tool set in effect from time T",
- * and each generation looks its set up by timestamp. Since snapshots are
- * written only on change, the timeline outlives a hook run: session state keeps
- * the (timestamp, hash) changes, and each set is stored once, by hash, in a
- * shared directory. The format is internal to Claude Code, so anything
- * unexpected is skipped and the span simply carries no tool definitions.
+ * Which tool definitions each generation was offered, from Claude Code's internal
+ * `prompt_snapshot` / `deferred_tools_record` rows. They are written only when the
+ * set changes, so the timeline persists across runs. Unknown shapes are skipped.
  */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { stateDir } from "./config.js";
-import { debug } from "./logger.js";
-import type { Json, Row } from "./types.js";
+import { debug, stateDir } from "./config.js";
+import type { Row } from "./transcript.js";
 
 /** From `timestamp` on, the tool set stored under `hash` is in effect. */
 export interface ToolSetChange {
@@ -43,7 +29,7 @@ function toolSetDir(): string {
 }
 
 /** An Anthropic tool definition from either row's entry shape, or null. */
-function toToolDefinition(entry: Json): Row | null {
+function toToolDefinition(entry: any): Row | null {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.name !== "string") {
     return null;
   }
@@ -58,7 +44,7 @@ function toToolDefinition(entry: Json): Row | null {
   return tool;
 }
 
-function toToolDefinitions(entries: Json): Row[] {
+function toToolDefinitions(entries: any): Row[] {
   return Array.isArray(entries) ? entries.map(toToolDefinition).filter((t): t is Row => t !== null) : [];
 }
 
@@ -68,11 +54,7 @@ export class ToolTimeline {
   private readonly sets = new Map<string, ToolSet>();
   private current: ToolSet = { inline: [], deferred: [] };
 
-  /**
-   * `persist` writes each new set to the shared directory so later hook runs
-   * can resolve it; a subagent's timeline is built from its whole transcript
-   * every time, so it stays in memory.
-   */
+  /** `persist` stores new sets for later runs; a subagent's timeline is rebuilt each run. */
   constructor(changes: ToolSetChange[] = [], persist = true) {
     this.changes = changes.slice(-MAX_TOOL_SET_CHANGES);
     this.persist = persist;
@@ -110,11 +92,10 @@ export class ToolTimeline {
   }
 
   /**
-   * The tool definitions in effect at `timestamp`. A generation before the
-   * first recorded set gets that first set: the transcript's first request
-   * records no tools, yet it was sent the same ones.
+   * Tools in effect at `timestamp`. Before the first recorded set, that set: the
+   * first request records none but was sent the same tools.
    */
-  toolsAt(timestamp: Json): Row[] | null {
+  toolsAt(timestamp: any): Row[] | null {
     if (this.changes.length === 0) {
       return null;
     }

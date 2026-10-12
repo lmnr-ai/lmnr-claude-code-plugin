@@ -1,249 +1,212 @@
-import * as crypto from "node:crypto";
+/**
+ * Claude Code transcript access: row helpers, offset-aware reading, task
+ * notifications, subagent discovery. Rows are Claude Code's internal JSON.
+ */
 import * as fs from "node:fs";
-import { MAX_CHARS } from "./config.js";
-import { debug } from "./logger.js";
-import type { SessionState } from "./state.js";
-import type { Json, Row } from "./types.js";
+import * as path from "node:path";
+import { info, MAX_CHARS } from "./config.js";
 
-// ----------------- Transcript row parsing -----------------
-export function getContentFromRow(row: Row): Json {
-  if (typeof row !== "object" || row === null) {
-    return null;
-  }
-  const message = row.message;
-  if (typeof message === "object" && message !== null) {
-    return message.content;
-  }
-  return row.content;
+export type Row = Record<string, any>;
+
+export function contentOf(row: Row): any {
+  return typeof row.message === "object" && row.message !== null ? row.message.content : row.content;
 }
 
-export function getUserOrAssistantRoleFromRow(row: Row): string | null {
-  // Prefer top-level row.type when it marks a chat row, then fall back to
-  // nested message.role.
-  const rowType = row.type;
-  if (rowType === "user" || rowType === "assistant") {
-    return rowType;
+export function roleOf(row: Row): "user" | "assistant" | null {
+  if (row.type === "user" || row.type === "assistant") {
+    return row.type;
   }
-  const message = row.message;
-  if (typeof message === "object" && message !== null) {
-    const role = message.role;
-    if (role === "user" || role === "assistant") {
-      return role;
-    }
-  }
-  return null;
+  const role = row.message?.role;
+  return role === "user" || role === "assistant" ? role : null;
 }
 
-export function getMessageId(row: Row): string | null {
-  const m = row.message;
-  if (typeof m === "object" && m !== null) {
-    const mid = m.id;
-    if (typeof mid === "string" && mid) {
-      return mid;
-    }
-  }
-  return null;
-}
-
-export function getModel(row: Row): string {
-  const m = row.message;
-  if (typeof m === "object" && m !== null) {
-    return m.model || "claude";
-  }
-  return "claude";
-}
-
-/** Extract Anthropic token usage from an assistant message, if present. */
-export function getUsageDetailsFromRow(row: Row): Record<string, number> | null {
-  const m = row.message;
-  if (typeof m !== "object" || m === null) {
-    return null;
-  }
-  const u = m.usage;
-  if (typeof u !== "object" || u === null) {
-    return null;
-  }
-  const details: Record<string, number> = {};
-  for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
-    const v = u[key];
-    if (typeof v === "number" && Number.isInteger(v) && v > 0) {
-      details[key] = v;
-    }
-  }
-  return Object.keys(details).length > 0 ? details : null;
-}
-
-/** Parse a Claude Code jsonl row timestamp (ISO 8601 with trailing Z). */
-export function parseTimestamp(value: Json): Date | null {
-  if (typeof value === "object" && value !== null) {
-    value = value.timestamp;
-  }
-  if (typeof value !== "string" || !value) {
-    return null;
-  }
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-export function extractTextFromContent(content: Json): string {
+/** The text blocks of a content value, joined. */
+export function textOf(content: any): string {
   if (typeof content === "string") {
     return content;
   }
-  if (Array.isArray(content)) {
-    const parts: string[] = [];
-    for (const x of content) {
-      if (typeof x === "object" && x !== null && x.type === "text") {
-        parts.push(x.text || "");
-      } else if (typeof x === "string") {
-        parts.push(x);
-      }
-    }
-    return parts.filter((p) => p).join("\n");
-  }
-  return "";
-}
-
-export interface TruncMeta {
-  truncated: boolean;
-  orig_len: number;
-  kept_len?: number;
-  sha256?: string;
-}
-
-export function truncateText(s: string | null | undefined, maxChars: number = MAX_CHARS): [string, TruncMeta] {
-  if (s === null || s === undefined) {
-    return ["", { truncated: false, orig_len: 0 }];
-  }
-  const origLen = s.length;
-  if (origLen <= maxChars) {
-    return [s, { truncated: false, orig_len: origLen }];
-  }
-  const head = s.slice(0, maxChars);
-  return [
-    head,
-    {
-      truncated: true,
-      orig_len: origLen,
-      kept_len: head.length,
-      sha256: crypto.createHash("sha256").update(s, "utf-8").digest("hex"),
-    },
-  ];
-}
-
-function blocksOfType(content: Json, type: string): Row[] {
   if (!Array.isArray(content)) {
-    return [];
+    return "";
   }
-  return content.filter((x): x is Row => typeof x === "object" && x !== null && x.type === type);
+  return content
+    .map((b) => (typeof b === "string" ? b : b?.type === "text" ? b.text || "" : ""))
+    .filter(Boolean)
+    .join("\n");
 }
 
-export const getToolUseBlocks = (content: Json): Row[] => blocksOfType(content, "tool_use");
-export const getToolResultBlocks = (content: Json): Row[] => blocksOfType(content, "tool_result");
+export function blocksOf(content: any, type: string): Row[] {
+  return Array.isArray(content) ? content.filter((b) => b?.type === type) : [];
+}
+
+/** A row's timestamp (or a timestamp string) in epoch ms, else null. */
+export function tsOf(value: any): number | null {
+  const raw = typeof value === "object" && value !== null ? value.timestamp : value;
+  if (typeof raw !== "string" || !raw) {
+    return null;
+  }
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+export function truncate(s: string | null | undefined, maxChars = MAX_CHARS): string {
+  return s ? s.slice(0, maxChars) : "";
+}
 
 export function isToolResult(row: Row): boolean {
-  if (getUserOrAssistantRoleFromRow(row) !== "user") {
-    return false;
-  }
-  const content = getContentFromRow(row);
-  if (Array.isArray(content)) {
-    return content.some((x) => typeof x === "object" && x !== null && x.type === "tool_result");
-  }
-  return false;
+  return roleOf(row) === "user" && blocksOf(contentOf(row), "tool_result").length > 0;
 }
 
-// ----------------- Incremental transcript reading -----------------
+/** A real user prompt: what starts a turn (not injected context, a tool result, or a notification). */
+export function isPrompt(row: Row): boolean {
+  return roleOf(row) === "user" && !row.isMeta && !isToolResult(row) && !isTaskNotification(row);
+}
+
+// A finished background task reaches the model as <task-notification> XML: a user
+// row when idle, else a `queued_command` attachment. `queue-operation` rows carry
+// the same XML but are bookkeeping written before the model sees it; they don't count.
+function notificationText(row: Row): string | null {
+  if (row.type === "attachment") {
+    const a = row.attachment;
+    const isNotification = a?.type === "queued_command" && (a.commandMode === "task-notification" || a.origin?.kind === "task-notification");
+    return isNotification && typeof a.prompt === "string" ? a.prompt : null;
+  }
+  if (roleOf(row) !== "user") {
+    return null;
+  }
+  const text = textOf(contentOf(row));
+  return row.origin?.kind === "task-notification" || text.trimStart().startsWith("<task-notification>") ? text : null;
+}
+
+function xmlTag(text: string, tag: string): string | null {
+  const open = text.indexOf(`<${tag}>`);
+  if (open < 0) {
+    return null;
+  }
+  const close = text.indexOf(`</${tag}>`, open);
+  return close < 0 ? null : text.slice(open + tag.length + 2, close);
+}
+
+export const isTaskNotification = (row: Row): boolean => notificationText(row) !== null;
+
+/** The tool_use a notification resolves: its tool-use-id, else its task id via `taskIds`. */
+export function notificationToolUseId(row: Row, taskIds: Record<string, string>): string | null {
+  const text = notificationText(row);
+  if (text === null) {
+    return null;
+  }
+  const toolUseId = xmlTag(text, "tool-use-id")?.trim();
+  if (toolUseId) {
+    return toolUseId;
+  }
+  const taskId = xmlTag(text, "task-id")?.trim();
+  return (taskId && taskIds[taskId]) || null;
+}
+
+export function notificationResult(row: Row): string {
+  const text = notificationText(row) ?? "";
+  return xmlTag(text, "result") ?? text;
+}
+
+/** A parsed transcript row and the byte offset its line starts at. */
+export interface Line {
+  row: Row;
+  offset: number;
+}
+
 /**
- * If the buffered partial line is actually a complete JSON row (transcript
- * ended without a trailing newline), parse and return it. A genuinely partial
- * line always fails JSON.parse and stays buffered.
+ * Rows from byte `from` to EOF, and where the next read resumes. A final line with
+ * no newline counts if it parses (a partially written row never does).
  */
-function flushBufferedRow(sessionState: SessionState): Row[] {
-  const line = sessionState.buffer.trim();
-  if (!line) {
-    sessionState.buffer = "";
-    return [];
-  }
+export function readLines(file: string, from = 0): { lines: Line[]; end: number } {
+  let buf: Buffer;
   try {
-    const row = JSON.parse(line);
-    sessionState.buffer = "";
-    debug("flushed complete unterminated final transcript line");
-    return [row];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Reads only new bytes since sessionState.offset. Keeps sessionState.buffer for
- * the partial last line. Returns parsed JSON rows and the mutated state.
- * With flushBuffer (SessionEnd — no more bytes are coming), a buffered final
- * line that parses as complete JSON is returned instead of being held forever.
- */
-export function readNewJsonl(
-  transcriptPath: string,
-  sessionState: SessionState,
-  flushBuffer = false
-): [Row[], SessionState] {
-  const [msgs, state] = readNewJsonlIncremental(transcriptPath, sessionState);
-  if (flushBuffer) {
-    msgs.push(...flushBufferedRow(state));
-  }
-  return [msgs, state];
-}
-
-function readNewJsonlIncremental(transcriptPath: string, sessionState: SessionState): [Row[], SessionState] {
-  if (!fs.existsSync(transcriptPath)) {
-    return [[], sessionState];
-  }
-
-  let chunk: Buffer;
-  let newOffset: number;
-  try {
-    const fileSize = fs.statSync(transcriptPath).size;
-    if (fileSize < sessionState.offset) {
-      // Transcript was rotated or truncated — restart from the beginning.
-      debug(`transcript shrank (${fileSize} < ${sessionState.offset}); restarting`);
-      sessionState.offset = 0;
-      sessionState.buffer = "";
-    }
-    const fd = fs.openSync(transcriptPath, "r");
+    const fd = fs.openSync(file, "r");
     try {
-      const len = Math.max(0, fileSize - sessionState.offset);
-      chunk = Buffer.alloc(len);
-      if (len > 0) {
-        fs.readSync(fd, chunk, 0, len, sessionState.offset);
+      const size = fs.fstatSync(fd).size;
+      buf = Buffer.alloc(Math.max(0, size - from));
+      if (buf.length > 0) {
+        fs.readSync(fd, buf, 0, buf.length, from);
       }
-      newOffset = fileSize;
     } finally {
       fs.closeSync(fd);
     }
   } catch (e) {
-    debug(`readNewJsonl failed: ${e}`);
-    return [[], sessionState];
+    info(`transcript read failed (${file}): ${e}`);
+    return { lines: [], end: from };
   }
 
-  if (chunk.length === 0) {
-    return [[], sessionState];
+  const lines: Line[] = [];
+  let end = from;
+  let start = 0;
+  while (start < buf.length) {
+    const nl = buf.indexOf(0x0a, start);
+    const stop = nl < 0 ? buf.length : nl;
+    const text = buf.toString("utf-8", start, stop).trim();
+    let row: unknown = null;
+    if (text) {
+      try {
+        row = JSON.parse(text);
+      } catch {
+        if (nl < 0) {
+          break; // partially written final line: resume here next time
+        }
+      }
+    }
+    if (typeof row === "object" && row !== null && !Array.isArray(row)) {
+      lines.push({ row: row as Row, offset: from + start });
+    }
+    start = nl < 0 ? buf.length : nl + 1;
+    end = from + start;
   }
+  return { lines, end };
+}
 
-  const text = chunk.toString("utf-8");
-  const combined = sessionState.buffer + text;
-  const lines = combined.split("\n");
-  // The last element may be an incomplete line.
-  sessionState.buffer = lines[lines.length - 1] ?? "";
-  sessionState.offset = newOffset;
+export interface SubagentTranscript {
+  path: string;
+  agentId: string;
+  agentType?: string;
+  description?: string;
+}
 
-  const msgs: Row[] = [];
-  for (const rawLine of lines.slice(0, -1)) {
-    const line = rawLine.trim();
-    if (!line) {
+/**
+ * Subagent transcripts: `<stem>/subagents/agent-<id>.jsonl`, each with a `.meta.json`
+ * naming the launching tool_use. Nested subagents share the directory.
+ */
+export function findSubagents(transcriptPath: string): Record<string, SubagentTranscript> {
+  const dir = path.join(path.dirname(transcriptPath), path.basename(transcriptPath, path.extname(transcriptPath)), "subagents");
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return {};
+  }
+  const out: Record<string, SubagentTranscript> = {};
+  for (const name of names) {
+    if (!name.endsWith(".meta.json")) {
       continue;
     }
+    const stem = name.slice(0, -".meta.json".length);
+    const jsonl = path.join(dir, `${stem}.jsonl`);
+    let meta: Row;
     try {
-      msgs.push(JSON.parse(line));
+      meta = JSON.parse(fs.readFileSync(path.join(dir, name), "utf-8"));
     } catch {
       continue;
     }
+    if (typeof meta?.toolUseId !== "string" || !meta.toolUseId || !fs.existsSync(jsonl)) {
+      continue;
+    }
+    out[meta.toolUseId] = {
+      path: jsonl,
+      agentId: stem.replace(/^agent-/, ""),
+      agentType: meta.agentType,
+      description: meta.description,
+    };
   }
-  return [msgs, sessionState];
+  return out;
+}
+
+/** agentId → launching tool_use id, so a task-id-only notification can be attributed. */
+export function taskIdMap(subagents: Record<string, SubagentTranscript>): Record<string, string> {
+  return Object.fromEntries(Object.entries(subagents).map(([toolUseId, s]) => [s.agentId, toolUseId]));
 }

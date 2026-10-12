@@ -1,33 +1,33 @@
 /**
- * Translation of Claude Code transcript content into the `gen_ai.*` span
- * attributes Laminar ingests. This module owns the wire-format contract
- * (message shapes, usage keys) and nothing about span timing or emission
- * ordering — that stays in the renderer.
- *
- * Messages keep the Anthropic Messages API shape, which is what the transcript
- * already holds and what Laminar's trace view renders natively: an assistant
- * message carries text / thinking / tool_use blocks, and tool results go back
- * as tool_result blocks in the next user message. The only changes are size
- * bounds: strings are truncated to MAX_CHARS, thinking signatures and
- * redacted-thinking payloads are dropped, and images and documents become
- * short text markers.
+ * `gen_ai.*` attributes in Anthropic Messages API shape, bounded in size: long strings
+ * truncated, thinking signatures dropped, images and documents replaced by markers.
  */
-import { getContentFromRow, getModel, getToolUseBlocks, getUsageDetailsFromRow, truncateText } from "./transcript.js";
-import type { Json, Row } from "./types.js";
-import { jsonDumps } from "./util.js";
+import { blocksOf, contentOf, truncate, type Row } from "./transcript.js";
 
-/** A tool result ready to fold into the next generation's input messages. */
-export interface GenerationToolResult {
-  toolUseId: string;
-  // Raw tool_result content from the transcript: a string or a block array.
-  content: Json;
-  isError?: boolean;
+const USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
+// A generation's input stays under this so its span fits in one export request.
+const MAX_INPUT_BYTES = 2 * 1024 * 1024;
+
+/** The history as JSON; past MAX_INPUT_BYTES the oldest messages after the prompt become a note. */
+function boundedHistoryJson(history: Row[]): string {
+  const json = JSON.stringify(history);
+  if (Buffer.byteLength(json) <= MAX_INPUT_BYTES || history.length < 2) {
+    return json;
+  }
+  const sizes = history.map((m) => Buffer.byteLength(JSON.stringify(m)) + 1);
+  let budget = MAX_INPUT_BYTES - sizes[0]! - 100;
+  let keepFrom = history.length;
+  while (keepFrom > 1 && sizes[keepFrom - 1]! <= budget) {
+    budget -= sizes[--keepFrom]!;
+  }
+  const note = { role: "user", content: [{ type: "text", text: `[${keepFrom - 1} earlier messages omitted]` }] };
+  return JSON.stringify([history[0], note, ...history.slice(keepFrom)]);
 }
 
 /** Truncate every string in a JSON value (tool inputs can carry whole files). */
-function truncateStrings(value: Json): Json {
+function truncateStrings(value: any): any {
   if (typeof value === "string") {
-    return truncateText(value)[0];
+    return truncate(value);
   }
   if (Array.isArray(value)) {
     return value.map(truncateStrings);
@@ -42,19 +42,19 @@ function truncateStrings(value: Json): Json {
   return value;
 }
 
-function toAnthropicBlock(block: Json): Row | null {
+function toAnthropicBlock(block: any): Row | null {
   if (typeof block === "string") {
-    return block ? { type: "text", text: truncateText(block)[0] } : null;
+    return block ? { type: "text", text: truncate(block) } : null;
   }
   if (typeof block !== "object" || block === null || Array.isArray(block)) {
     return null;
   }
   switch (block.type) {
     case "text":
-      return block.text ? { type: "text", text: truncateText(String(block.text))[0] } : null;
+      return block.text ? { type: "text", text: truncate(String(block.text)) } : null;
     case "thinking":
-      // The signature is an opaque verification blob; it says nothing to a reader.
-      return block.thinking ? { type: "thinking", thinking: truncateText(String(block.thinking))[0] } : null;
+      // The signature is an opaque blob.
+      return block.thinking ? { type: "thinking", thinking: truncate(String(block.thinking)) } : null;
     case "redacted_thinking":
       return { type: "redacted_thinking", data: "" };
     case "tool_use":
@@ -71,16 +71,16 @@ function toAnthropicBlock(block: Json): Row | null {
 }
 
 /** Convert a transcript row's content (a string or a block array) to Anthropic content blocks. */
-export function toAnthropicContent(content: Json): Row[] {
+export function toAnthropicContent(content: any): Row[] {
   const blocks = Array.isArray(content) ? content : [content];
   return blocks.map(toAnthropicBlock).filter((b): b is Row => b !== null);
 }
 
-function toolResultBlock(toolUseId: string, content: Json, isError: boolean): Row {
+export function toolResultBlock(toolUseId: string, content: any, isError: boolean): Row {
   const block: Row = {
     type: "tool_result",
     tool_use_id: toolUseId,
-    content: typeof content === "string" ? truncateText(content)[0] : toAnthropicContent(content ?? ""),
+    content: typeof content === "string" ? truncate(content) : toAnthropicContent(content ?? ""),
   };
   if (isError) {
     block.is_error = true;
@@ -88,57 +88,47 @@ function toolResultBlock(toolUseId: string, content: Json, isError: boolean): Ro
   return block;
 }
 
-/** The user message that opens a turn. */
+/** A user row (the prompt, or context Claude Code injected) as a user message. */
 export function buildUserMessage(userRow: Row): Row {
-  return { role: "user", content: toAnthropicContent(getContentFromRow(userRow)) };
+  return { role: "user", content: toAnthropicContent(contentOf(userRow)) };
 }
 
-/** The user message that hands a batch of tool results back to the model. */
-export function buildToolResultMessage(toolResults: GenerationToolResult[]): Row {
-  return {
-    role: "user",
-    content: toolResults.map((r) => toolResultBlock(r.toolUseId, r.content, r.isError === true)),
-  };
-}
-
-/**
- * Build the `gen_ai.*` attribute payload for one assistant generation, given
- * the turn's messages so far and the tools it was offered. Returns the attributes, the tool_use blocks the
- * renderer needs for tool spans, and the assistant message to append to the
- * history for the next generation.
- */
+/** One generation's attributes, its tool_use blocks, and the message to append to the history. */
 export function buildGenerationAttributes(
   history: Row[],
   assistantMessage: Row,
   toolDefinitions: Row[] | null = null
-): [Record<string, Json>, Row[], Row] {
-  const content = getContentFromRow(assistantMessage);
-  const toolUses = getToolUseBlocks(content);
+): [Record<string, any>, Row[], Row] {
+  const content = contentOf(assistantMessage);
+  const toolUses = blocksOf(content, "tool_use");
   const outputMessage: Row = { role: "assistant", content: toAnthropicContent(content) };
 
-  const model = getModel(assistantMessage);
-  const attrs: Record<string, Json> = {
+  const model = assistantMessage.message?.model || "claude";
+  const attrs: Record<string, any> = {
     "gen_ai.system": "anthropic",
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
-    "gen_ai.input.messages": jsonDumps(history),
+    "gen_ai.input.messages": boundedHistoryJson(history),
   };
   if (toolDefinitions !== null && toolDefinitions.length > 0) {
-    attrs["gen_ai.tool.definitions"] = jsonDumps(toolDefinitions);
+    attrs["gen_ai.tool.definitions"] = JSON.stringify(toolDefinitions);
   }
 
   const stopReason = assistantMessage.message?.stop_reason;
-  attrs["gen_ai.output.messages"] = jsonDumps([
+  attrs["gen_ai.output.messages"] = JSON.stringify([
     typeof stopReason === "string" ? { ...outputMessage, stop_reason: stopReason } : outputMessage,
   ]);
 
-  const usageDetails = getUsageDetailsFromRow(assistantMessage);
-  if (usageDetails !== null) {
-    let total = 0;
-    for (const [key, value] of Object.entries(usageDetails)) {
+  const usage = assistantMessage.message?.usage ?? {};
+  let total = 0;
+  for (const key of USAGE_KEYS) {
+    const value = usage[key];
+    if (Number.isInteger(value) && value > 0) {
       attrs[`gen_ai.usage.${key}`] = value;
       total += value;
     }
+  }
+  if (total > 0) {
     attrs["llm.usage.total_tokens"] = total;
   }
 

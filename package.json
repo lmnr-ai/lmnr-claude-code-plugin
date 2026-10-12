@@ -14,14 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
-    "@opentelemetry/resources": "^1.30.0",
-    "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@types/node": "^22.0.0",
-    "@types/proper-lockfile": "^4.1.4",
     "esbuild": "^0.24.0",
-    "proper-lockfile": "^4.1.2",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
