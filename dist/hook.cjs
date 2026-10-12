@@ -26069,6 +26069,8 @@ var ToolTimeline = class _ToolTimeline {
   changes;
   persist;
   sets = /* @__PURE__ */ new Map();
+  // null when the latest recorded set can't be loaded (its file was pruned or
+  // lost): deferred additions then have no base to build on.
   current = { inline: [], deferred: [] };
   /**
    * `persist` writes each new set to the shared directory so later hook runs
@@ -26080,7 +26082,7 @@ var ToolTimeline = class _ToolTimeline {
     this.persist = persist;
     const last = this.changes[this.changes.length - 1];
     if (last) {
-      this.current = this.load(last.hash) ?? this.current;
+      this.current = this.load(last.hash);
     }
   }
   /** Build an in-memory timeline from a whole transcript (a subagent's). */
@@ -26098,8 +26100,11 @@ var ToolTimeline = class _ToolTimeline {
       return;
     }
     if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { ...this.current, inline: toToolDefinitions(attachment.tools) });
+      this.record(row.timestamp, { deferred: this.current?.deferred ?? [], inline: toToolDefinitions(attachment.tools) });
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
+      if (this.current === null) {
+        return;
+      }
       const deferred = new Map(this.current.deferred.map((t) => [t.name, t]));
       for (const tool of toToolDefinitions(attachment.entries)) {
         deferred.set(tool.name, tool);
@@ -26157,6 +26162,7 @@ var ToolTimeline = class _ToolTimeline {
       const raw = JSON.parse(fs5.readFileSync(path3.join(toolSetDir(), `${hash}.json`), "utf-8"));
       const set = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
       this.sets.set(hash, set);
+      touchToolSet(hash);
       return set;
     } catch (e) {
       debug(`tool set ${hash.slice(0, 12)} unavailable: ${e}`);
@@ -26164,14 +26170,21 @@ var ToolTimeline = class _ToolTimeline {
     }
   }
 };
+function touchToolSet(hash) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    fs5.utimesSync(path3.join(toolSetDir(), `${hash}.json`), now, now);
+  } catch (e) {
+    debug(`touching tool set ${hash.slice(0, 12)} failed: ${e}`);
+  }
+}
 function saveToolSet(hash, set) {
   try {
     const dir = toolSetDir();
     fs5.mkdirSync(dir, { recursive: true });
     const file = path3.join(dir, `${hash}.json`);
     if (fs5.existsSync(file)) {
-      const now = /* @__PURE__ */ new Date();
-      fs5.utimesSync(file, now, now);
+      touchToolSet(hash);
       return;
     }
     fs5.writeFileSync(file, JSON.stringify(set), "utf-8");

@@ -66,7 +66,9 @@ export class ToolTimeline {
   changes: ToolSetChange[];
   private readonly persist: boolean;
   private readonly sets = new Map<string, ToolSet>();
-  private current: ToolSet = { inline: [], deferred: [] };
+  // null when the latest recorded set can't be loaded (its file was pruned or
+  // lost): deferred additions then have no base to build on.
+  private current: ToolSet | null = { inline: [], deferred: [] };
 
   /**
    * `persist` writes each new set to the shared directory so later hook runs
@@ -78,7 +80,7 @@ export class ToolTimeline {
     this.persist = persist;
     const last = this.changes[this.changes.length - 1];
     if (last) {
-      this.current = this.load(last.hash) ?? this.current;
+      this.current = this.load(last.hash);
     }
   }
 
@@ -98,8 +100,13 @@ export class ToolTimeline {
       return;
     }
     if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { ...this.current, inline: toToolDefinitions(attachment.tools) });
+      this.record(row.timestamp, { deferred: this.current?.deferred ?? [], inline: toToolDefinitions(attachment.tools) });
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
+      if (this.current === null) {
+        // Recording deferred tools alone would persist a set without the
+        // inline ones; wait for the next prompt_snapshot instead.
+        return;
+      }
       const deferred = new Map(this.current.deferred.map((t) => [t.name as string, t]));
       for (const tool of toToolDefinitions(attachment.entries)) {
         deferred.set(tool.name, tool);
@@ -160,11 +167,25 @@ export class ToolTimeline {
       const raw = JSON.parse(fs.readFileSync(path.join(toolSetDir(), `${hash}.json`), "utf-8"));
       const set: ToolSet = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
       this.sets.set(hash, set);
+      touchToolSet(hash);
       return set;
     } catch (e) {
       debug(`tool set ${hash.slice(0, 12)} unavailable: ${e}`);
       return null;
     }
+  }
+}
+
+/**
+ * Mark a stored set as in use so pruning keeps it: its mtime is "last used".
+ * A session whose set never changes only ever loads it, so loading counts.
+ */
+function touchToolSet(hash: string): void {
+  try {
+    const now = new Date();
+    fs.utimesSync(path.join(toolSetDir(), `${hash}.json`), now, now);
+  } catch (e) {
+    debug(`touching tool set ${hash.slice(0, 12)} failed: ${e}`);
   }
 }
 
@@ -175,8 +196,7 @@ function saveToolSet(hash: string, set: ToolSet): void {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${hash}.json`);
     if (fs.existsSync(file)) {
-      const now = new Date();
-      fs.utimesSync(file, now, now); // still in use: keep it from being pruned
+      touchToolSet(hash);
       return;
     }
     fs.writeFileSync(file, JSON.stringify(set), "utf-8");
