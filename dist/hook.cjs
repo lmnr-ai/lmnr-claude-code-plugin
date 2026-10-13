@@ -2879,12 +2879,24 @@ async function withSessionLock(key, fn, timing = {}) {
   const token = `${process.pid}:${crypto3.randomBytes(8).toString("hex")}`;
   const deadline = Date.now() + waitMs;
   for (; ; ) {
+    let fd = null;
     try {
-      const fd = fs5.openSync(lock, "wx");
+      fd = fs5.openSync(lock, "wx");
       fs5.writeSync(fd, token);
       fs5.closeSync(fd);
       break;
     } catch (e) {
+      if (fd !== null) {
+        try {
+          fs5.closeSync(fd);
+        } catch {
+        }
+        try {
+          fs5.rmSync(lock, { force: true });
+        } catch {
+        }
+        return fn();
+      }
       if (e?.code !== "EEXIST") {
         return fn();
       }

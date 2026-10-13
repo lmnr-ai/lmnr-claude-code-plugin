@@ -110,12 +110,27 @@ export async function withSessionLock<T>(key: string, fn: () => Promise<T>, timi
   const token = `${process.pid}:${crypto.randomBytes(8).toString("hex")}`;
   const deadline = Date.now() + waitMs;
   for (;;) {
+    let fd: number | null = null;
     try {
-      const fd = fs.openSync(lock, "wx");
+      fd = fs.openSync(lock, "wx");
       fs.writeSync(fd, token);
       fs.closeSync(fd);
       break;
     } catch (e: any) {
+      if (fd !== null) {
+        // Created but not stamped: nobody could ever release it, so undo it.
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // already closed
+        }
+        try {
+          fs.rmSync(lock, { force: true });
+        } catch {
+          // left to go stale
+        }
+        return fn();
+      }
       if (e?.code !== "EEXIST") {
         return fn();
       }

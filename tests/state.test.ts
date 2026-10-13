@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
@@ -7,6 +8,7 @@ import { withSessionLock } from "../src/state.js";
 
 process.env.CC_LMNR_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-lock-"));
 const lockFile = (key: string) => path.join(process.env.CC_LMNR_STATE_DIR!, "lmnr_sessions", `${key}.lock`);
+const fsCjs = createRequire(import.meta.url)("node:fs") as typeof fs;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("session lock", () => {
@@ -53,5 +55,24 @@ describe("session lock", () => {
       fs.writeFileSync(lockFile("taken"), "other-run"); // as if another run took it over
     }, timing);
     assert.equal(fs.readFileSync(lockFile("taken"), "utf-8"), "other-run");
+  });
+
+  it("a lock it created but couldn't stamp is removed, and the run goes ahead unlocked", async () => {
+    const writeSync = fsCjs.writeSync;
+    fsCjs.writeSync = (() => {
+      throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+    }) as typeof fs.writeSync;
+    syncBuiltinESMExports();
+    let ran = false;
+    try {
+      await withSessionLock("nospace", async () => {
+        ran = true;
+      }, timing);
+    } finally {
+      fsCjs.writeSync = writeSync;
+      syncBuiltinESMExports();
+    }
+    assert.ok(ran);
+    assert.equal(fs.existsSync(lockFile("nospace")), false);
   });
 });
