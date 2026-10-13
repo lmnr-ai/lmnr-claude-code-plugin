@@ -66,4 +66,42 @@ describe("ToolTimeline", () => {
     assert.deepEqual(later.toolsAt("2026-07-08T10:00:30.000Z")?.map((t) => t.name), ["Read"]);
     assert.deepEqual(later.toolsAt("2026-07-08T10:02:00.000Z")?.map((t) => t.name), ["Read", "mcp__demo__word_counter"]);
   });
+
+  it("an unchanged set reloaded in a later run is not recorded as a change", () => {
+    const first = new ToolTimeline();
+    first.observe(promptSnapshotRow([read], "2026-07-08T10:00:00.000Z"));
+    first.observe(deferredToolsRow([counter], "2026-07-08T10:00:10.000Z"));
+
+    const later = new ToolTimeline(first.changes);
+    later.observe(deferredToolsRow([counter], "2026-07-08T10:01:00.000Z"));
+    assert.deepEqual(later.changes, first.changes);
+  });
+
+  it("loading a stored set counts as using it, so pruning keeps it", () => {
+    const first = new ToolTimeline();
+    first.observe(promptSnapshotRow([read], "2026-07-08T10:00:00.000Z"));
+    const file = path.join(process.env.CC_LMNR_STATE_DIR!, "lmnr_tool_sets", `${first.changes[0]!.hash}.json`);
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(file, old, old);
+
+    // A resumed process records no snapshot; it only loads the saved set.
+    new ToolTimeline(first.changes);
+    assert.ok(fs.statSync(file).mtimeMs > Date.now() - 60_000);
+  });
+
+  it("does not build on a stored set that is gone", () => {
+    const first = new ToolTimeline();
+    first.observe(promptSnapshotRow([bash], "2026-07-08T10:00:00.000Z"));
+    fs.rmSync(path.join(process.env.CC_LMNR_STATE_DIR!, "lmnr_tool_sets", `${first.changes[0]!.hash}.json`));
+
+    const later = new ToolTimeline(first.changes);
+    // Deferred tools alone would persist a set missing every inline tool.
+    later.observe(deferredToolsRow([counter], "2026-07-08T10:01:00.000Z"));
+    assert.equal(later.changes.length, 1);
+    assert.equal(later.toolsAt("2026-07-08T10:02:00.000Z"), null);
+
+    // The next snapshot gives a full inline set again.
+    later.observe(promptSnapshotRow([read], "2026-07-08T10:03:00.000Z"));
+    assert.deepEqual(later.toolsAt("2026-07-08T10:04:00.000Z")?.map((t) => t.name), ["Read"]);
+  });
 });

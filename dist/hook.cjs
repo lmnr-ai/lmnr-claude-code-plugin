@@ -2316,6 +2316,8 @@ var ToolTimeline = class _ToolTimeline {
   changes;
   persist;
   sets = /* @__PURE__ */ new Map();
+  // null when the latest recorded set can't be loaded (its file was pruned or
+  // lost): deferred additions then have no base to build on.
   current = { inline: [], deferred: [] };
   /** `persist` stores new sets for later runs; a subagent's timeline is rebuilt each run. */
   constructor(changes = [], persist = true) {
@@ -2323,7 +2325,7 @@ var ToolTimeline = class _ToolTimeline {
     this.persist = persist;
     const last = this.changes[this.changes.length - 1];
     if (last) {
-      this.current = this.load(last.hash) ?? this.current;
+      this.current = this.load(last.hash);
     }
   }
   /** Build an in-memory timeline from a whole transcript (a subagent's). */
@@ -2341,8 +2343,11 @@ var ToolTimeline = class _ToolTimeline {
       return;
     }
     if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { ...this.current, inline: toToolDefinitions(attachment.tools) });
+      this.record(row.timestamp, { inline: toToolDefinitions(attachment.tools), deferred: this.current?.deferred ?? [] });
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
+      if (this.current === null) {
+        return;
+      }
       const deferred = new Map(this.current.deferred.map((t) => [t.name, t]));
       for (const tool of toToolDefinitions(attachment.entries)) {
         deferred.set(tool.name, tool);
@@ -2374,7 +2379,8 @@ var ToolTimeline = class _ToolTimeline {
     const tools = [...set.inline, ...set.deferred];
     return tools.length > 0 ? tools : null;
   }
-  record(timestamp, set) {
+  record(timestamp, { inline, deferred }) {
+    const set = { inline, deferred };
     this.current = set;
     const hash = crypto2.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
     this.sets.set(hash, set);
@@ -2399,6 +2405,7 @@ var ToolTimeline = class _ToolTimeline {
       const raw = JSON.parse(fs4.readFileSync(path4.join(toolSetDir(), `${hash}.json`), "utf-8"));
       const set = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
       this.sets.set(hash, set);
+      touchToolSet(hash);
       return set;
     } catch (e) {
       debug(`tool set ${hash.slice(0, 12)} unavailable: ${e}`);
@@ -2406,14 +2413,21 @@ var ToolTimeline = class _ToolTimeline {
     }
   }
 };
+function touchToolSet(hash) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    fs4.utimesSync(path4.join(toolSetDir(), `${hash}.json`), now, now);
+  } catch (e) {
+    debug(`touching tool set ${hash.slice(0, 12)} failed: ${e}`);
+  }
+}
 function saveToolSet(hash, set) {
   try {
     const dir = toolSetDir();
     fs4.mkdirSync(dir, { recursive: true });
     const file = path4.join(dir, `${hash}.json`);
     if (fs4.existsSync(file)) {
-      const now = /* @__PURE__ */ new Date();
-      fs4.utimesSync(file, now, now);
+      touchToolSet(hash);
       return;
     }
     fs4.writeFileSync(file, JSON.stringify(set), "utf-8");
