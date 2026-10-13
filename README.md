@@ -73,8 +73,8 @@ length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
 ## How it works
 
 - **Stop hook** — fires after each assistant response; the plugin reads the new
-  portion of the transcript (tracked by byte offset in
-  `~/.claude/state/lmnr_state.json`), assembles complete turns, and emits them.
+  portion of the transcript (tracked by byte offset in a per-session file under
+  `~/.claude/state/lmnr_sessions/`), assembles complete turns, and emits them.
 - **SessionEnd hook** — flushes any turns still deferred (e.g. waiting for
   background agent notifications).
 - Turns that launched an async agent are deferred until the agent's task

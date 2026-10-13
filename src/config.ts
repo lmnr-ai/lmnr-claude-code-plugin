@@ -2,17 +2,25 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// ----------------- Configuration -----------------
-/** Read a plugin userConfig value (CLAUDE_PLUGIN_OPTION_<NAME>) with a fallback to a plain env var. */
-export function opt(name: string): string {
-  return process.env[`CLAUDE_PLUGIN_OPTION_${name}`] || process.env[name] || "";
+export interface LaminarConfig {
+  apiKey: string;
+  baseUrl: string;
+  userId: string | null;
 }
 
-/** Directory where `lmnr-cli login` stores credentials (mirrors the CLI's resolution). */
+const env = (name: string): string => process.env[name] ?? "";
+const nonEmpty = (v: unknown): string => (typeof v === "string" ? v : "");
+
+export const DEBUG = env("CC_LMNR_DEBUG").toLowerCase() === "true";
+export const CAPTURE_SKILL_CONTENT = env("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
+export const MAX_CHARS = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10) || 20000;
+// Cap for the OTLP request (connect + response).
+export const EXPORT_TIMEOUT_MS = 5000;
+
+/** Where `lmnr-cli` keeps its files. */
 function lmnrConfigDir(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  if (xdg) {
-    return path.join(xdg, "lmnr");
+  if (process.env.XDG_CONFIG_HOME) {
+    return path.join(process.env.XDG_CONFIG_HOME, "lmnr");
   }
   if (process.platform === "win32" && process.env.APPDATA) {
     return path.join(process.env.APPDATA, "lmnr");
@@ -20,107 +28,62 @@ function lmnrConfigDir(): string {
   return path.join(os.homedir(), ".config", "lmnr");
 }
 
-/**
- * User identity persisted by `lmnr-cli login` (RFC 8628 device flow), so a
- * logged-in user is attributed with zero config. Returns the stored email
- * (preferred) or user id, or null if not logged in / unreadable (fail-open).
- */
-function readLoggedInUserId(): string | null {
+/** A JSON object from disk, or {} when missing/unreadable (fail-open). */
+export function readJsonObject(file: string): Record<string, any> {
   try {
-    const creds = JSON.parse(fs.readFileSync(path.join(lmnrConfigDir(), "credentials.json"), "utf-8"));
-    if (typeof creds !== "object" || creds === null) {
-      return null;
-    }
-    if (typeof creds.userEmail === "string" && creds.userEmail) {
-      return creds.userEmail;
-    }
-    return typeof creds.userId === "string" && creds.userId ? creds.userId : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Laminar plugin config written by `lmnr-cli plugin add claude-code`
- * (`~/.config/lmnr/claude-code-plugin.json`). This is the primary source for the
- * project API key: Codex has no per-plugin secret store, so both plugins share
- * this file convention rather than each agent's bespoke config surface. Plain,
- * unencrypted, and read fail-open (missing/unreadable → {}).
- */
-function readAgentPluginConfig(): { projectApiKey?: string; baseUrl?: string } {
-  try {
-    const raw = JSON.parse(
-      fs.readFileSync(path.join(lmnrConfigDir(), "claude-code-plugin.json"), "utf-8"),
-    );
-    if (typeof raw !== "object" || raw === null) {
-      return {};
-    }
-    const out: { projectApiKey?: string; baseUrl?: string } = {};
-    if (typeof raw.projectApiKey === "string" && raw.projectApiKey) {
-      out.projectApiKey = raw.projectApiKey;
-    }
-    if (typeof raw.baseUrl === "string" && raw.baseUrl) {
-      out.baseUrl = raw.baseUrl;
-    }
-    return out;
+    const value = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
   } catch {
     return {};
   }
 }
 
-// ----------------- Paths -----------------
-// Resolved at call time (not module load) so CC_LMNR_STATE_DIR can relocate the
-// state directory and tests can point it at a temp dir.
-export function stateDir(): string {
-  return opt("CC_LMNR_STATE_DIR") || path.join(os.homedir(), ".claude", "state");
-}
-export function logFile(): string {
-  return path.join(stateDir(), "lmnr_hook.log");
-}
-export function stateFile(): string {
-  return path.join(stateDir(), "lmnr_state.json");
-}
-export function lockFile(): string {
-  return path.join(stateDir(), "lmnr_state.lock");
-}
-
-export const DEBUG = opt("CC_LMNR_DEBUG").toLowerCase() === "true";
-export const CAPTURE_SKILL_CONTENT = opt("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
-
-function parseMaxChars(): number {
-  const raw = opt("CC_LMNR_MAX_CHARS") || "20000";
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : 20000;
-}
-export const MAX_CHARS = parseMaxChars();
-
-// Bound for unresolved task notifications kept in the state file between runs.
-export const MAX_PENDING_TASK_NOTIFICATIONS = 50;
-
-// Cap for a single OTLP export request (connect + response), in seconds.
-export const EXPORT_TIMEOUT_S = 5.0;
-
-export interface LaminarConfig {
-  apiKey: string;
-  baseUrl: string;
-  userId: string | null;
-}
-
+/**
+ * API key and base URL from the file `lmnr-cli plugin add claude-code` writes,
+ * with env overrides; user id from `LMNR_USER_ID` or `lmnr-cli login`. Null without a key.
+ */
 export function getLaminarConfig(): LaminarConfig | null {
-  // Env wins (override / CI); otherwise the file written by `lmnr-cli plugin add`.
-  const fileCfg = readAgentPluginConfig();
-  const apiKey = opt("LMNR_PROJECT_API_KEY") || opt("CC_LMNR_PROJECT_API_KEY") || fileCfg.projectApiKey || "";
-  const baseUrl = (
-    opt("LMNR_BASE_URL") ||
-    opt("CC_LMNR_BASE_URL") ||
-    fileCfg.baseUrl ||
-    "https://api.lmnr.ai"
-  ).replace(/\/+$/, "");
-  // Explicit config wins; otherwise fall back to the logged-in CLI identity.
-  const userId = opt("LMNR_USER_ID") || readLoggedInUserId() || null;
-
+  const plugin = readJsonObject(path.join(lmnrConfigDir(), "claude-code-plugin.json"));
+  const apiKey = env("LMNR_PROJECT_API_KEY") || nonEmpty(plugin.projectApiKey);
   if (!apiKey) {
     return null;
   }
+  const baseUrl = (env("LMNR_BASE_URL") || nonEmpty(plugin.baseUrl) || "https://api.lmnr.ai").replace(/\/+$/, "");
+  const creds = readJsonObject(path.join(lmnrConfigDir(), "credentials.json"));
+  const userId = env("LMNR_USER_ID") || nonEmpty(creds.userEmail) || nonEmpty(creds.userId) || null;
   return { apiKey, baseUrl, userId };
+}
+
+// Resolved at call time so CC_LMNR_STATE_DIR can relocate it (tests use a temp dir).
+export function stateDir(): string {
+  return env("CC_LMNR_STATE_DIR") || path.join(os.homedir(), ".claude", "state");
+}
+
+const LOG_MAX_BYTES = 5_000_000;
+
+function writeLog(level: string, msg: string): void {
+  try {
+    const file = path.join(stateDir(), "lmnr_hook.log");
+    fs.mkdirSync(stateDir(), { recursive: true });
+    try {
+      if (fs.statSync(file).size > LOG_MAX_BYTES) {
+        fs.renameSync(file, `${file}.1`);
+      }
+    } catch {
+      // No log yet.
+    }
+    fs.appendFileSync(file, `${new Date().toISOString()} [${level}] ${msg}\n`, "utf-8");
+  } catch {
+    // Logging must never throw.
+  }
+}
+
+export function debug(msg: string): void {
+  if (DEBUG) {
+    writeLog("DEBUG", msg);
+  }
+}
+
+export function info(msg: string): void {
+  writeLog("INFO", msg);
 }

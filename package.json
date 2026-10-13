@@ -6,22 +6,20 @@
   "private": true,
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=18"
+    "node": "^18.19.0 || >=20.6.0"
   },
   "scripts": {
-    "build": "esbuild src/hook.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/hook.cjs",
+    "build": "esbuild src/hook.ts --bundle --main-fields=module,main --platform=node --target=node18 --format=cjs --outfile=dist/hook.cjs",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
-    "@opentelemetry/resources": "^1.30.0",
-    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.12.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
     "@types/node": "^22.0.0",
-    "@types/proper-lockfile": "^4.1.4",
     "esbuild": "^0.24.0",
-    "proper-lockfile": "^4.1.2",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
