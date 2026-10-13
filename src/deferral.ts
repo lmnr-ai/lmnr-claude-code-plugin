@@ -3,7 +3,7 @@ import { debug } from "./logger.js";
 import { getToolUseIdForTaskNotification, isTaskNotificationRow } from "./notifications.js";
 import type { PendingAgentTurn, SessionState } from "./state.js";
 import type { SubagentTranscript } from "./subagents.js";
-import { getContentFromRow, getToolUseBlocks } from "./transcript.js";
+import { getContentFromRow, getToolUseBlocks, getUserOrAssistantRoleFromRow, isToolResult } from "./transcript.js";
 import type { ToolResultEntry, Turn } from "./turns.js";
 import type { Row } from "./types.js";
 import { jsonDumps } from "./util.js";
@@ -127,9 +127,22 @@ export function resolveDeferredAgentTurns(
     routeToPendingTurn(pendingTurn, row, toolUseId);
   }
 
+  // Rows before the batch's first real prompt continue the newest turn deferred
+  // in an earlier run: when a background agent reports back, Claude answers it
+  // inside that turn (an isMeta <agent-message> row, then assistant rows) before
+  // any new prompt. Assembled on their own they'd have no prompt and be dropped.
+  const continuedTurn = sessionState.pendingAgentTurns[sessionState.pendingAgentTurns.length - 1] ?? null;
+  let beforeFirstPrompt = true;
   for (const row of rows) {
     if (!isTaskNotificationRow(row)) {
-      remainingRows.push(row);
+      if (beforeFirstPrompt && getUserOrAssistantRoleFromRow(row) === "user" && !row.isMeta && !isToolResult(row)) {
+        beforeFirstPrompt = false;
+      }
+      if (beforeFirstPrompt && continuedTurn !== null) {
+        continuedTurn.rows.push(row);
+      } else {
+        remainingRows.push(row);
+      }
       continue;
     }
     const toolUseId = getToolUseIdForTaskNotification(row, taskIdToToolUseId);

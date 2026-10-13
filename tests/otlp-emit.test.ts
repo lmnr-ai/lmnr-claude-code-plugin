@@ -23,7 +23,7 @@ import {
 import type { SubagentTranscript } from "../src/subagents.js";
 import { TraceEmitter } from "../src/tracer.js";
 import { buildTurns, type Turn } from "../src/turns.js";
-import { assistantRow, spansByName, toolResultRow, userRow } from "./helpers.js";
+import { assistantRow, promptSnapshotRow, spansByName, toolResultRow, userRow } from "./helpers.js";
 
 function makeEmitter(userId: string | null = null): TraceEmitter {
   const config: LaminarConfig = { apiKey: "k", baseUrl: "http://localhost:1", userId };
@@ -322,6 +322,159 @@ describe("incomplete trailing turn (flush race)", () => {
   });
 });
 
+describe("background agent reporting back to a deferred turn", () => {
+  let dir: string | null = null;
+  afterEach(() => {
+    process.env.CC_LMNR_STATE_DIR = BASELINE_STATE_DIR;
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    }
+  });
+
+  it("keeps Claude's reply to the agent's message in the turn, with the message as its input", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-bg-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const append = (rows: any[]) => fs.appendFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const runStop = async (finalAssistantText: string) => {
+      const emitter = makeEmitter();
+      const n = await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        finalAssistantText,
+        exportFn: async () => true,
+      });
+      return [n, emitter] as const;
+    };
+
+    // The turn launches a background agent and ends; it is deferred until the
+    // agent's task-notification arrives.
+    append([
+      userRow("count words in the background", "2026-07-08T10:00:00.000Z"),
+      assistantRow([{ type: "tool_use", id: "tu_bg", name: "Agent", input: { prompt: "count", run_in_background: true } }], {
+        msgId: "m1",
+        ts: "2026-07-08T10:00:01.000Z",
+      }),
+      toolResultRow("tu_bg", "Async agent launched successfully", "2026-07-08T10:00:02.000Z", {
+        toolUseResult: { status: "async_launched" },
+      }),
+      assistantRow([{ type: "text", text: "Running in the background." }], { msgId: "m2", ts: "2026-07-08T10:00:03.000Z" }),
+    ]);
+    assert.equal((await runStop("Running in the background."))[0], 0);
+
+    // The agent reports back as an injected message, and Claude answers it — no
+    // new prompt in front of these rows.
+    append([
+      userRow("<agent-message>13 words</agent-message>", "2026-07-08T10:00:10.000Z", { isMeta: true }),
+      assistantRow([{ type: "text", text: "It has 13 words." }], { msgId: "m3", ts: "2026-07-08T10:00:11.000Z" }),
+    ]);
+    assert.equal((await runStop("It has 13 words."))[0], 0);
+
+    // The notification resolves the deferred turn, which now includes the reply.
+    append([
+      userRow(
+        "<task-notification><tool-use-id>tu_bg</tool-use-id><result>13 words</result></task-notification>",
+        "2026-07-08T10:00:12.000Z"
+      ),
+    ]);
+    const [emitted, emitter] = await runStop("");
+    assert.equal(emitted, 1);
+    const names = spansByName(emitter.spans);
+    const llm3 = names["LLM Call 3"];
+    assert.ok(llm3, "the reply to the agent's message is its own generation");
+    const input = JSON.parse(attrs(llm3)["gen_ai.input.messages"]);
+    assert.deepEqual(input[input.length - 1], {
+      role: "user",
+      content: [{ type: "text", text: "<agent-message>13 words</agent-message>" }],
+    });
+    assert.match(String(attrs(names["Claude Code - Turn 1 (sess)"]!)["lmnr.span.output"]), /13 words/);
+  });
+});
+
+describe("tool definitions on LLM spans", () => {
+  let dir: string | null = null;
+  afterEach(() => {
+    process.env.CC_LMNR_STATE_DIR = BASELINE_STATE_DIR;
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    }
+  });
+
+  const read = { name: "Read", description: "Reads a file", schema: { type: "object" } };
+  const toolNames = (span: ReadableSpan | undefined) =>
+    JSON.parse(attrs(span!)["gen_ai.tool.definitions"] ?? "[]").map((t: any) => t.name);
+
+  it("carries the recorded tool set into later hook runs that record none", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-tooldefs-"));
+    process.env.CC_LMNR_STATE_DIR = dir;
+    const transcript = path.join(dir, "session.jsonl");
+    const append = (rows: any[]) => fs.appendFileSync(transcript, rows.map((r) => JSON.stringify(r) + "\n").join(""));
+    const runStop = async (finalAssistantText: string) => {
+      const emitter = makeEmitter();
+      await emitNewTurnsFromTranscript(emitter, emitter.config, "sess", transcript, {
+        finalAssistantText,
+        exportFn: async () => true,
+      });
+      return emitter;
+    };
+
+    append([
+      userRow("first", "2026-07-08T10:00:00.000Z"),
+      promptSnapshotRow([read], "2026-07-08T10:00:00.500Z"),
+      assistantRow([{ type: "text", text: "one" }], { msgId: "m1", ts: "2026-07-08T10:00:01.000Z" }),
+    ]);
+    const first = await runStop("one");
+    assert.deepEqual(toolNames(spansByName(first.spans)["LLM Call 1"]), ["Read"]);
+    assert.deepEqual(JSON.parse(attrs(spansByName(first.spans)["LLM Call 1"]!)["gen_ai.tool.definitions"])[0], {
+      name: "Read",
+      description: "Reads a file",
+      input_schema: { type: "object" },
+    });
+
+    // The next turn's rows have no snapshot: the set is unchanged.
+    append([
+      userRow("second", "2026-07-08T10:01:00.000Z"),
+      assistantRow([{ type: "text", text: "two" }], { msgId: "m2", ts: "2026-07-08T10:01:01.000Z" }),
+    ]);
+    const second = await runStop("two");
+    assert.deepEqual(toolNames(spansByName(second.spans)["LLM Call 1"]), ["Read"]);
+  });
+
+  it("gives a subagent's generations the tools from its own transcript", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-subtools-"));
+    try {
+      const subJsonl = path.join(tmp, "agent-t.jsonl");
+      const handback = { name: "SubagentHandback", description: "Report back", schema: { type: "object" } };
+      fs.writeFileSync(
+        subJsonl,
+        [
+          userRow("sub prompt", "2026-07-08T10:00:06.000Z"),
+          promptSnapshotRow([read, handback], "2026-07-08T10:00:06.500Z"),
+          assistantRow([{ type: "text", text: "sub answer" }], { msgId: "sm1", ts: "2026-07-08T10:00:08.000Z" }),
+        ]
+          .map((r) => JSON.stringify(r))
+          .join("\n") + "\n"
+      );
+      const emitter = makeEmitter();
+      const turns = buildTurns([
+        userRow("delegate"),
+        assistantRow([{ type: "tool_use", id: "tu_task", name: "Agent", input: { prompt: "go" } }]),
+        toolResultRow("tu_task", "done", "2026-07-08T10:00:09.000Z"),
+        assistantRow([{ type: "text", text: "summary" }], { msgId: "m2", ts: "2026-07-08T10:00:10.000Z" }),
+      ]);
+      emitTurn(emitter, emitter.config, "sess", 1, turns[0]!, "/tmp/t.jsonl", {
+        tu_task: { path: subJsonl, agentId: "t", agentType: "general-purpose", description: "sub" },
+      });
+      const names = spansByName(emitter.spans);
+      assert.deepEqual(toolNames(names["Subagent LLM Call 1"]), ["Read", "SubagentHandback"]);
+      // No tool timeline was given for the main session here.
+      assert.equal(attrs(names["LLM Call 1"]!)["gen_ai.tool.definitions"], undefined);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("emitTurn", () => {
   const emit = (rows: any[], subagents: Record<string, SubagentTranscript> | null = null): TraceEmitter => {
     const emitter = makeEmitter();
@@ -353,10 +506,12 @@ describe("emitTurn", () => {
     assert.equal(llmAttrs["gen_ai.request.model"], "claude-opus-4-7");
     assert.equal(llmAttrs["gen_ai.usage.input_tokens"], 10);
     assert.equal(llmAttrs["gen_ai.usage.output_tokens"], 5);
-    assert.deepEqual(JSON.parse(llmAttrs["gen_ai.input.messages"]), [{ role: "user", content: "hello" }]);
+    assert.deepEqual(JSON.parse(llmAttrs["gen_ai.input.messages"]), [
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ]);
     const outMsgs = JSON.parse(llmAttrs["gen_ai.output.messages"]);
     assert.equal(outMsgs[0].role, "assistant");
-    assert.equal(outMsgs[0].content, "hi");
+    assert.deepEqual(outMsgs[0].content, [{ type: "text", text: "hi" }]);
   });
 
   it("tool turn spans", () => {
@@ -374,14 +529,30 @@ describe("emitTurn", () => {
     assert.deepEqual(JSON.parse(toolAttrs["lmnr.span.input"]), { command: "ls" });
     assert.deepEqual(JSON.parse(toolAttrs["lmnr.span.output"]), "file.txt");
 
+    // LLM Call 2 sees the whole turn so far, in Anthropic Messages API shape:
+    // the prompt, the tool_use it answered, and the tool_result in a user message.
     const llm2Attrs = attrs(names["LLM Call 2"]!);
-    const inMsgs = JSON.parse(llm2Attrs["gen_ai.input.messages"]);
-    assert.equal(inMsgs[0].role, "tool");
-    assert.equal(inMsgs[0].tool_call_id, "tu_1");
+    assert.deepEqual(JSON.parse(llm2Attrs["gen_ai.input.messages"]), [
+      { role: "user", content: [{ type: "text", text: "run ls" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "file.txt" }] },
+    ]);
 
     const llm1Attrs = attrs(names["LLM Call 1"]!);
     const outMsgs = JSON.parse(llm1Attrs["gen_ai.output.messages"]);
-    assert.equal(outMsgs[0].tool_calls[0].name, "Bash");
+    assert.deepEqual(outMsgs[0].content, [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }]);
+  });
+
+  it("tool span output replaces a returned image with a marker", () => {
+    const emitter = emit([
+      userRow("look at it"),
+      assistantRow([{ type: "tool_use", id: "tu_img", name: "Read", input: { file_path: "red.png" } }]),
+      toolResultRow("tu_img", [{ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo" } }]),
+      assistantRow([{ type: "text", text: "red" }], { msgId: "m2", ts: "2026-07-08T10:00:15.000Z" }),
+    ]);
+    const output = attrs(spansByName(emitter.spans)["Read"]!)["lmnr.span.output"];
+    assert.ok(!String(output).includes("iVBORw0KGgo"));
+    assert.deepEqual(JSON.parse(JSON.parse(output)), [{ type: "text", text: "[image]" }]);
   });
 
   it("timestamps backdated and ordered", () => {
@@ -447,6 +618,52 @@ describe("emitTurn", () => {
       assert.equal(subSpan.parentSpanId, toolSpan.spanContext().spanId);
       assert.equal(subLlm.parentSpanId, subSpan.spanContext().spanId);
       assert.equal(attrs(subSpan)["claude_code.subagent.type"], "Explore");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("nested subagent nests under its parent subagent's tool span", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lmnr-nested-"));
+    try {
+      const write = (name: string, rows: any[]) => {
+        const p = path.join(dir, name);
+        fs.writeFileSync(p, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+        return p;
+      };
+      const outerPath = write("agent-outer.jsonl", [
+        userRow("launch a nested one", "2026-07-08T10:00:06.000Z"),
+        assistantRow([{ type: "tool_use", id: "tu_inner", name: "Agent", input: { prompt: "read" } }], {
+          msgId: "om1",
+          ts: "2026-07-08T10:00:07.000Z",
+        }),
+        toolResultRow("tu_inner", "first line", "2026-07-08T10:00:09.000Z"),
+        assistantRow([{ type: "text", text: "nested said: first line" }], { msgId: "om2", ts: "2026-07-08T10:00:10.000Z" }),
+      ]);
+      const innerPath = write("agent-inner.jsonl", [
+        userRow("read", "2026-07-08T10:00:07.500Z"),
+        assistantRow([{ type: "text", text: "first line" }], { msgId: "im1", ts: "2026-07-08T10:00:08.000Z" }),
+      ]);
+      const subagents: Record<string, SubagentTranscript> = {
+        tu_outer: { path: outerPath, agentId: "outer", agentType: "general-purpose", description: "outer" },
+        tu_inner: { path: innerPath, agentId: "inner", agentType: "general-purpose", description: "inner" },
+      };
+      const emitter = emit(
+        [
+          userRow("delegate"),
+          assistantRow([{ type: "tool_use", id: "tu_outer", name: "Agent", input: { prompt: "go" } }]),
+          toolResultRow("tu_outer", "nested said: first line", "2026-07-08T10:00:11.000Z"),
+          assistantRow([{ type: "text", text: "done" }], { msgId: "m2", ts: "2026-07-08T10:00:12.000Z" }),
+        ],
+        subagents
+      );
+      const byName = (name: string) => emitter.spans.filter((s) => s.name === name);
+      const outer = byName("Subagent: outer")[0]!;
+      const inner = byName("Subagent: inner")[0]!;
+      const innerTool = byName("Agent").find((s) => s.parentSpanId === outer.spanContext().spanId)!;
+      assert.ok(innerTool, "the outer subagent's Agent call has a tool span under it");
+      assert.equal(inner.parentSpanId, innerTool.spanContext().spanId);
+      assert.equal(byName("Subagent: outer").length, 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -533,14 +750,16 @@ describe("emitTurn", () => {
 
       // The generation right after launch sees the initial launch text; the async
       // result is folded only into the generation after the notification resolves.
+      const lastResult = (messages: any[]) => messages[messages.length - 1].content[0];
       const llm2In = JSON.parse(attrs(names["LLM Call 2"]!)["gen_ai.input.messages"]);
-      assert.equal(llm2In[0].tool_call_id, "tu_task");
-      assert.ok(String(llm2In[0].content).includes("Async agent launched"));
-      assert.ok(!String(llm2In[0].content).includes("async task result"));
+      assert.equal(lastResult(llm2In).tool_use_id, "tu_task");
+      assert.ok(String(lastResult(llm2In).content).includes("Async agent launched"));
+      assert.ok(!JSON.stringify(llm2In).includes("async task result"));
 
       const llm3In = JSON.parse(attrs(names["LLM Call 3"]!)["gen_ai.input.messages"]);
-      assert.equal(llm3In[0].tool_call_id, "tu_task");
-      assert.ok(String(llm3In[0].content).includes("async task result"));
+      assert.equal(llm3In.length, 5); // prompt, launch, launch result, "working on it", async result
+      assert.equal(lastResult(llm3In).tool_use_id, "tu_task");
+      assert.ok(String(lastResult(llm3In).content).includes("async task result"));
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
