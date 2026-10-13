@@ -26100,7 +26100,7 @@ var ToolTimeline = class _ToolTimeline {
       return;
     }
     if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { deferred: this.current?.deferred ?? [], inline: toToolDefinitions(attachment.tools) });
+      this.record(row.timestamp, { inline: toToolDefinitions(attachment.tools), deferred: this.current?.deferred ?? [] });
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
       if (this.current === null) {
         return;
@@ -26137,7 +26137,8 @@ var ToolTimeline = class _ToolTimeline {
     const tools = [...set.inline, ...set.deferred];
     return tools.length > 0 ? tools : null;
   }
-  record(timestamp, set) {
+  record(timestamp, { inline, deferred }) {
+    const set = { inline, deferred };
     this.current = set;
     const hash = crypto2.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
     this.sets.set(hash, set);

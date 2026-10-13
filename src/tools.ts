@@ -100,7 +100,7 @@ export class ToolTimeline {
       return;
     }
     if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { deferred: this.current?.deferred ?? [], inline: toToolDefinitions(attachment.tools) });
+      this.record(row.timestamp, { inline: toToolDefinitions(attachment.tools), deferred: this.current?.deferred ?? [] });
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
       if (this.current === null) {
         // Recording deferred tools alone would persist a set without the
@@ -141,7 +141,10 @@ export class ToolTimeline {
     return tools.length > 0 ? tools : null;
   }
 
-  private record(timestamp: string, set: ToolSet): void {
+  private record(timestamp: string, { inline, deferred }: ToolSet): void {
+    // Fixed key order: the hash is over the JSON text, and the same set must
+    // hash the same whether it was just observed or loaded from its file.
+    const set: ToolSet = { inline, deferred };
     this.current = set;
     const hash = crypto.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
     this.sets.set(hash, set);

@@ -67,6 +67,16 @@ describe("ToolTimeline", () => {
     assert.deepEqual(later.toolsAt("2026-07-08T10:02:00.000Z")?.map((t) => t.name), ["Read", "mcp__demo__word_counter"]);
   });
 
+  it("an unchanged set reloaded in a later run is not recorded as a change", () => {
+    const first = new ToolTimeline();
+    first.observe(promptSnapshotRow([read], "2026-07-08T10:00:00.000Z"));
+    first.observe(deferredToolsRow([counter], "2026-07-08T10:00:10.000Z"));
+
+    const later = new ToolTimeline(first.changes);
+    later.observe(deferredToolsRow([counter], "2026-07-08T10:01:00.000Z"));
+    assert.deepEqual(later.changes, first.changes);
+  });
+
   it("loading a stored set counts as using it, so pruning keeps it", () => {
     const first = new ToolTimeline();
     first.observe(promptSnapshotRow([read], "2026-07-08T10:00:00.000Z"));
