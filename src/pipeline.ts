@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { debug, info, type LaminarConfig } from "./config.js";
 import { exportSpans, MAX_BATCH_BYTES, spanBytes, Tracer, type Span } from "./otlp.js";
 import { hasReply, renderTurn, type RenderContext } from "./render.js";
-import { emptyState, loadState, saveState, sessionKey, withSessionLock } from "./state.js";
+import { emptyState, LOCK_WAIT_MS, LOCK_WAIT_SESSION_END_MS, loadState, saveState, sessionKey, withSessionLock } from "./state.js";
 import { ToolTimeline } from "./tools.js";
 import { findSubagents, readLines, taskIdMap } from "./transcript.js";
 import { isIncomplete, pendingAgents, routeNotifications, splitTurns, type Turn } from "./turns.js";
@@ -78,6 +78,7 @@ export async function processTranscript(
   const { sessionEnd = false, finalAssistantText = "", exportFn = exportSpans, renderFn = renderTurn } = opts;
   const key = sessionKey(sessionId, transcriptPath);
 
+  const waitMs = sessionEnd ? LOCK_WAIT_SESSION_END_MS : LOCK_WAIT_MS;
   return withSessionLock(key, async () => {
     let state = loadState(key, transcriptPath);
     if (fileSize(transcriptPath) < state.offset) {
@@ -154,5 +155,5 @@ export async function processTranscript(
       toolSetChanges: tools.changes,
     });
     return sent;
-  });
+  }, { waitMs });
 }

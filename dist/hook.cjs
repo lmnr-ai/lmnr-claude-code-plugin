@@ -2818,7 +2818,9 @@ var fs5 = __toESM(require("node:fs"), 1);
 var path6 = __toESM(require("node:path"), 1);
 var MAX_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
 var LOCK_WAIT_MS = 1e4;
+var LOCK_WAIT_SESSION_END_MS = 6e4;
 var LOCK_STALE_MS = 3e4;
+var LOCK_HEARTBEAT_MS = 5e3;
 var sessionsDir = () => path6.join(stateDir(), "lmnr_sessions");
 function sessionKey(sessionId, transcriptPath) {
   return crypto3.createHash("sha256").update(`${sessionId}::${transcriptPath}`, "utf-8").digest("hex");
@@ -2866,17 +2868,21 @@ function pruneOldSessions() {
   } catch {
   }
 }
-async function withSessionLock(key, fn) {
+async function withSessionLock(key, fn, timing = {}) {
+  const { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE_MS, heartbeatMs = LOCK_HEARTBEAT_MS } = timing;
   const lock = path6.join(sessionsDir(), `${key}.lock`);
   try {
     fs5.mkdirSync(sessionsDir(), { recursive: true });
   } catch {
     return fn();
   }
-  const deadline = Date.now() + LOCK_WAIT_MS;
+  const token = `${process.pid}:${crypto3.randomBytes(8).toString("hex")}`;
+  const deadline = Date.now() + waitMs;
   for (; ; ) {
     try {
-      fs5.closeSync(fs5.openSync(lock, "wx"));
+      const fd = fs5.openSync(lock, "wx");
+      fs5.writeSync(fd, token);
+      fs5.closeSync(fd);
       break;
     } catch (e) {
       if (e?.code !== "EEXIST") {
@@ -2884,7 +2890,7 @@ async function withSessionLock(key, fn) {
       }
     }
     try {
-      if (Date.now() - fs5.statSync(lock).mtimeMs > LOCK_STALE_MS) {
+      if (Date.now() - fs5.statSync(lock).mtimeMs > staleMs) {
         fs5.rmSync(lock, { force: true });
         continue;
       }
@@ -2896,10 +2902,30 @@ async function withSessionLock(key, fn) {
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+  const ours = () => {
+    try {
+      return fs5.readFileSync(lock, "utf-8") === token;
+    } catch {
+      return false;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    try {
+      if (ours()) {
+        const now = /* @__PURE__ */ new Date();
+        fs5.utimesSync(lock, now, now);
+      }
+    } catch {
+    }
+  }, heartbeatMs);
+  heartbeat.unref();
   try {
     return await fn();
   } finally {
-    fs5.rmSync(lock, { force: true });
+    clearInterval(heartbeat);
+    if (ours()) {
+      fs5.rmSync(lock, { force: true });
+    }
   }
 }
 function migrateLegacyState(key, transcriptPath) {
@@ -2972,6 +2998,7 @@ function fileSize(file) {
 async function processTranscript(config, sessionId, transcriptPath, opts = {}) {
   const { sessionEnd = false, finalAssistantText = "", exportFn = exportSpans, renderFn = renderTurn } = opts;
   const key = sessionKey(sessionId, transcriptPath);
+  const waitMs = sessionEnd ? LOCK_WAIT_SESSION_END_MS : LOCK_WAIT_MS;
   return withSessionLock(key, async () => {
     let state = loadState(key, transcriptPath);
     if (fileSize(transcriptPath) < state.offset) {
@@ -3042,7 +3069,7 @@ async function processTranscript(config, sessionId, transcriptPath, opts = {}) {
       toolSetChanges: tools.changes
     });
     return sent;
-  });
+  }, { waitMs });
 }
 
 // src/hook.ts

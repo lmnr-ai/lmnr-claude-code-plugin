@@ -22,8 +22,20 @@ export interface SessionState {
 }
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-const LOCK_WAIT_MS = 10_000;
+// A Stop run holds Claude Code up while it waits, and whatever it skips goes out
+// on a later run; SessionEnd is the last run, so it waits out a slow export.
+export const LOCK_WAIT_MS = 10_000;
+export const LOCK_WAIT_SESSION_END_MS = 60_000;
+// The holder touches its lock while it runs; one untouched this long was left
+// by a killed run.
 const LOCK_STALE_MS = 30_000;
+const LOCK_HEARTBEAT_MS = 5_000;
+
+export interface LockTiming {
+  waitMs?: number;
+  staleMs?: number;
+  heartbeatMs?: number;
+}
 
 const sessionsDir = () => path.join(stateDir(), "lmnr_sessions");
 
@@ -84,19 +96,24 @@ function pruneOldSessions(): void {
 
 /**
  * Serialize overlapping hook runs for a session. Throws on timeout; runs unlocked
- * if the lock file can't be created.
+ * if the lock file can't be created. A run holds the lock through its exports
+ * (each up to EXPORT_TIMEOUT_MS), so it keeps the lock fresh while alive.
  */
-export async function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export async function withSessionLock<T>(key: string, fn: () => Promise<T>, timing: LockTiming = {}): Promise<T> {
+  const { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE_MS, heartbeatMs = LOCK_HEARTBEAT_MS } = timing;
   const lock = path.join(sessionsDir(), `${key}.lock`);
   try {
     fs.mkdirSync(sessionsDir(), { recursive: true });
   } catch {
     return fn();
   }
-  const deadline = Date.now() + LOCK_WAIT_MS;
+  const token = `${process.pid}:${crypto.randomBytes(8).toString("hex")}`;
+  const deadline = Date.now() + waitMs;
   for (;;) {
     try {
-      fs.closeSync(fs.openSync(lock, "wx"));
+      const fd = fs.openSync(lock, "wx");
+      fs.writeSync(fd, token);
+      fs.closeSync(fd);
       break;
     } catch (e: any) {
       if (e?.code !== "EEXIST") {
@@ -104,7 +121,7 @@ export async function withSessionLock<T>(key: string, fn: () => Promise<T>): Pro
       }
     }
     try {
-      if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
+      if (Date.now() - fs.statSync(lock).mtimeMs > staleMs) {
         fs.rmSync(lock, { force: true }); // left by a killed run
         continue;
       }
@@ -116,10 +133,32 @@ export async function withSessionLock<T>(key: string, fn: () => Promise<T>): Pro
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+  // Only ever touch or remove our own lock: after a takeover the file is another run's.
+  const ours = () => {
+    try {
+      return fs.readFileSync(lock, "utf-8") === token;
+    } catch {
+      return false;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    try {
+      if (ours()) {
+        const now = new Date();
+        fs.utimesSync(lock, now, now);
+      }
+    } catch {
+      // A missed beat only matters past staleMs.
+    }
+  }, heartbeatMs);
+  heartbeat.unref();
   try {
     return await fn();
   } finally {
-    fs.rmSync(lock, { force: true });
+    clearInterval(heartbeat);
+    if (ours()) {
+      fs.rmSync(lock, { force: true });
+    }
   }
 }
 
