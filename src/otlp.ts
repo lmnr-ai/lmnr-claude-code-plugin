@@ -1,8 +1,13 @@
 /**
- * Minimal OTLP/HTTP/JSON: spans with backdated times, serialized the way the
- * OpenTelemetry JS SDK does, sent with fetch.
+ * Spans with backdated times, sent with the OpenTelemetry OTLP/HTTP/JSON
+ * exporter. Batching is ours (pipeline.ts), not a span processor's: a run needs
+ * each request's outcome to know which turns went out.
  */
 import * as crypto from "node:crypto";
+import { SpanKind, SpanStatusCode, TraceFlags, type HrTime } from "@opentelemetry/api";
+import { ExportResultCode, type ExportResult } from "@opentelemetry/core";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { debug, EXPORT_TIMEOUT_MS, info, type LaminarConfig } from "./config.js";
 
 export type AttrValue = string | number | boolean;
@@ -84,56 +89,42 @@ export class Tracer {
   }
 }
 
-function attrValue(v: AttrValue): Record<string, AttrValue> {
-  if (typeof v === "string") {
-    return { stringValue: v };
-  }
-  if (typeof v === "boolean") {
-    return { boolValue: v };
-  }
-  return Number.isInteger(v) ? { intValue: v } : { doubleValue: v };
-}
+// The SDK's span type (@opentelemetry/sdk-trace), as the exporter declares it.
+type ReadableSpan = Parameters<OTLPTraceExporter["export"]>[0][number];
 
-const toAttributes = (attrs: Record<string, AttrValue>) =>
-  Object.entries(attrs).map(([key, value]) => ({ key, value: attrValue(value) }));
+const SAMPLED = { traceFlags: TraceFlags.SAMPLED };
+const RESOURCE = resourceFromAttributes({
+  "service.name": "claude-code",
+  "telemetry.sdk.language": "nodejs",
+  "telemetry.sdk.name": "lmnr-claude-code-plugin",
+});
+const SCOPE = { name: "lmnr.claude_code" };
 
-const nanos = (ms: number) => (BigInt(Math.round(ms)) * 1_000_000n).toString();
+const hrTime = (ms: number): HrTime => {
+  const whole = Math.round(ms);
+  return [Math.floor(whole / 1000), (whole % 1000) * 1_000_000];
+};
 
-export function toOtlpJson(spans: Span[]): object {
+/** Our spans as the SDK's `ReadableSpan`, which is what the OTLP exporter takes. */
+export function toReadableSpan(s: Span): ReadableSpan {
   return {
-    resourceSpans: [
-      {
-        resource: {
-          attributes: toAttributes({
-            "service.name": "claude-code",
-            "telemetry.sdk.language": "nodejs",
-            "telemetry.sdk.name": "lmnr-claude-code-plugin",
-          }),
-          droppedAttributesCount: 0,
-        },
-        scopeSpans: [
-          {
-            scope: { name: "lmnr.claude_code" },
-            spans: spans.map((s) => ({
-              traceId: s.traceId,
-              spanId: s.spanId,
-              parentSpanId: s.parentSpanId,
-              name: s.name,
-              kind: 1, // INTERNAL
-              startTimeUnixNano: nanos(s.startMs),
-              endTimeUnixNano: nanos(s.endMs),
-              attributes: toAttributes(s.attributes),
-              droppedAttributesCount: 0,
-              events: [],
-              droppedEventsCount: 0,
-              status: { code: 1 }, // OK
-              links: [],
-              droppedLinksCount: 0,
-            })),
-          },
-        ],
-      },
-    ],
+    name: s.name,
+    kind: SpanKind.INTERNAL,
+    spanContext: () => ({ traceId: s.traceId, spanId: s.spanId, ...SAMPLED }),
+    parentSpanContext: s.parentSpanId ? { traceId: s.traceId, spanId: s.parentSpanId, ...SAMPLED } : undefined,
+    startTime: hrTime(s.startMs),
+    endTime: hrTime(s.endMs),
+    duration: hrTime(s.endMs - s.startMs),
+    ended: true,
+    status: { code: SpanStatusCode.OK },
+    attributes: s.attributes,
+    links: [],
+    events: [],
+    resource: RESOURCE,
+    instrumentationScope: SCOPE,
+    droppedAttributesCount: 0,
+    droppedEventsCount: 0,
+    droppedLinksCount: 0,
   };
 }
 
@@ -144,23 +135,39 @@ export const MAX_BATCH_BYTES = 4 * 1024 * 1024;
 /** Rough serialized size of a span: its attributes plus envelope overhead. */
 export const spanBytes = (span: Span): number => Buffer.byteLength(JSON.stringify(span.attributes)) + 512;
 
-/** POST the spans in one request; true on 2xx. Never throws. */
+/**
+ * The exporter merges `OTEL_EXPORTER_OTLP_*` env config (headers, certificates,
+ * timeout, ...) into its own. Claude Code passes its telemetry settings to hooks
+ * that way, so a key meant for the user's own collector would go to Laminar.
+ * The hook is its own short-lived process: drop them before building one.
+ */
+function dropOtlpEnv(): void {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("OTEL_EXPORTER_OTLP_")) {
+      delete process.env[key];
+    }
+  }
+}
+
+/** Send the spans in one OTLP/HTTP/JSON request; true on success. Never throws. */
 export async function exportSpans(config: LaminarConfig, spans: Span[]): Promise<boolean> {
   if (spans.length === 0) {
     return true;
   }
   try {
-    const res = await fetch(`${config.baseUrl}/v1/traces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
-      body: JSON.stringify(toOtlpJson(spans)),
-      signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS),
+    dropOtlpEnv();
+    const exporter = new OTLPTraceExporter({
+      url: `${config.baseUrl}/v1/traces`,
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      timeoutMillis: EXPORT_TIMEOUT_MS, // bounds retries too
     });
-    if (res.ok) {
+    const result = await new Promise<ExportResult>((resolve) => exporter.export(spans.map(toReadableSpan), resolve));
+    await exporter.shutdown().catch(() => {});
+    if (result.code === ExportResultCode.SUCCESS) {
       debug(`OTLP export: ${spans.length} span(s)`);
       return true;
     }
-    info(`OTLP export failed: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 500)}`);
+    info(`OTLP export failed: ${String(result.error ?? "unknown error").slice(0, 500)}`);
     return false;
   } catch (e) {
     info(`OTLP export failed: ${e}`);

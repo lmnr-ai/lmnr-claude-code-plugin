@@ -5,10 +5,10 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { getLaminarConfig, MAX_CHARS } from "../src/config.js";
 import { buildGenerationAttributes, buildUserMessage, toolResultBlock } from "../src/genai.js";
-import { Tracer, endSpan, toOtlpJson } from "../src/otlp.js";
+import { Tracer, endSpan, exportSpans } from "../src/otlp.js";
 import { mergeAssistantRows } from "../src/render.js";
 import { findSubagents, isTaskNotification, notificationResult, notificationToolUseId, readLines, taskIdMap } from "../src/transcript.js";
-import { assistantRow, notificationRow, userRow } from "./helpers.js";
+import { assistantRow, notificationRow, userRow, withCollector } from "./helpers.js";
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
   const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
@@ -68,17 +68,24 @@ describe("config", () => {
   });
 });
 
-describe("OTLP/JSON payload", () => {
-  it("matches the OpenTelemetry JS serializer's shape", () => {
+describe("OTLP export", () => {
+  it("sends OTLP/JSON to {base}/v1/traces with the project key", async () => {
     const tracer = new Tracer();
     const root = tracer.start("root", Date.UTC(2026, 6, 8, 10), { "lmnr.span.type": "DEFAULT", skipped: null, n: 10, f: 0.5, b: true });
     const child = tracer.start("child", Date.UTC(2026, 6, 8, 10, 0, 1), {}, root);
     endSpan(child, Date.UTC(2026, 6, 8, 10, 0, 0)); // before its start → clamped
     endSpan(root, Date.UTC(2026, 6, 8, 10, 0, 2));
 
-    const payload = toOtlpJson(tracer.spans) as any;
-    const resourceSpans = payload.resourceSpans[0];
-    assert.deepEqual(resourceSpans.scopeSpans[0].scope, { name: "lmnr.claude_code" });
+    let ok = false;
+    const [req] = await withCollector(200, async (config) => {
+      ok = await exportSpans(config, tracer.spans);
+    });
+    assert.ok(ok);
+    assert.equal(req.url, "/v1/traces");
+    assert.equal(req.headers.authorization, "Bearer test-key");
+    assert.equal(req.headers["content-type"], "application/json");
+    const resourceSpans = req.body.resourceSpans[0];
+    assert.deepEqual(resourceSpans.scopeSpans[0].scope.name, "lmnr.claude_code");
     const [r, c] = resourceSpans.scopeSpans[0].spans;
     assert.match(r.traceId, /^[0-9a-f]{32}$/);
     assert.match(r.spanId, /^[0-9a-f]{16}$/);
@@ -86,15 +93,41 @@ describe("OTLP/JSON payload", () => {
     assert.equal(c.parentSpanId, r.spanId);
     assert.equal(c.traceId, r.traceId);
     assert.equal(r.startTimeUnixNano, (BigInt(Date.UTC(2026, 6, 8, 10)) * 1_000_000n).toString());
+    assert.equal(r.endTimeUnixNano, (BigInt(Date.UTC(2026, 6, 8, 10, 0, 2)) * 1_000_000n).toString());
     assert.equal(c.endTimeUnixNano, c.startTimeUnixNano);
     assert.equal(r.kind, 1);
-    assert.deepEqual(r.status, { code: 1 });
+    assert.equal(r.status.code, 1);
     assert.deepEqual(r.attributes, [
       { key: "lmnr.span.type", value: { stringValue: "DEFAULT" } },
       { key: "n", value: { intValue: 10 } },
       { key: "f", value: { doubleValue: 0.5 } },
       { key: "b", value: { boolValue: true } },
     ]);
+  });
+
+  it("ignores the user's own OTEL_EXPORTER_OTLP_* settings", async () => {
+    process.env.OTEL_EXPORTER_OTLP_HEADERS = "x-honeycomb-team=secret";
+    process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS = "x-other=secret";
+    try {
+      const tracer = new Tracer();
+      tracer.start("root", Date.now(), {});
+      const [req] = await withCollector(200, async (config) => {
+        assert.ok(await exportSpans(config, tracer.spans));
+      });
+      assert.equal(req.headers["x-honeycomb-team"], undefined);
+      assert.equal(req.headers["x-other"], undefined);
+    } finally {
+      delete process.env.OTEL_EXPORTER_OTLP_HEADERS;
+      delete process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS;
+    }
+  });
+
+  it("reports a rejected request as a failure", async () => {
+    const tracer = new Tracer();
+    tracer.start("root", Date.now(), {});
+    await withCollector(400, async (config) => {
+      assert.equal(await exportSpans(config, tracer.spans), false);
+    });
   });
 });
 

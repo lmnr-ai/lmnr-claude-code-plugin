@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { LaminarConfig } from "../src/config.js";
@@ -6,6 +8,36 @@ import type { Span } from "../src/otlp.js";
 import { processTranscript, type RunOptions } from "../src/pipeline.js";
 import { sessionKey, type SessionState } from "../src/state.js";
 import type { Row } from "../src/transcript.js";
+
+export interface CollectedRequest {
+  url?: string;
+  headers: http.IncomingHttpHeaders;
+  bytes: number;
+  body: any;
+}
+
+/** Run `fn` against a local OTLP endpoint answering `status`; returns the requests it got. */
+export async function withCollector(status: number, fn: (config: LaminarConfig) => Promise<void>): Promise<CollectedRequest[]> {
+  const received: CollectedRequest[] = [];
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks);
+      received.push({ url: req.url, headers: req.headers, bytes: raw.length, body: JSON.parse(raw.toString()) });
+      res.statusCode = status;
+      res.end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    await fn({ apiKey: "test-key", baseUrl: `http://127.0.0.1:${port}`, userId: null });
+  } finally {
+    server.close();
+  }
+  return received;
+}
 
 export function userRow(text: any, ts = "2026-07-08T10:00:00.000Z", extra: Row = {}): Row {
   return {

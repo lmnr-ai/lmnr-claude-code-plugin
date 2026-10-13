@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { toOtlpJson } from "../src/otlp.js";
+import { exportSpans } from "../src/otlp.js";
 import { sessionKey } from "../src/state.js";
 import {
   assistantRow,
@@ -17,6 +17,7 @@ import {
   TestSession,
   toolResultRow,
   userRow,
+  withCollector,
 } from "./helpers.js";
 
 let session: TestSession | null = null;
@@ -101,13 +102,11 @@ describe("export batching", () => {
 
   it("splits a turn too big for one request across requests under the server's limit", async () => {
     const s = open(longTurn("big", "2026-07-08T10:00:00.000Z", 30));
-    const sizes: number[] = [];
-    const { count } = await s.end({
-      exportFn: async (_config, batch) => {
-        sizes.push(Buffer.byteLength(JSON.stringify(toOtlpJson(batch))));
-        return true;
-      },
+    let count = 0;
+    const requests = await withCollector(200, async (collector) => {
+      ({ count } = await s.end({ exportFn: (_config, batch) => exportSpans(collector, batch) }));
     });
+    const sizes = requests.map((r) => r.bytes);
     assert.equal(count, 1);
     assert.ok(sizes.length > 1, `one request of ${sizes[0]} bytes`);
     assert.ok(Math.max(...sizes) < 5 * 1024 * 1024, `request sizes ${sizes}`);
