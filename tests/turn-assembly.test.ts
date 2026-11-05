@@ -15,6 +15,7 @@ import { getSessionState, SessionState, updateSessionState, type GlobalState } f
 import { getSubagentTranscriptsByToolUseId } from "../src/subagents.js";
 import { extractTextFromContent, getUsageDetailsFromRow, readNewJsonl, truncateText } from "../src/transcript.js";
 import { buildTurns, mergeAssistantRows } from "../src/turns.js";
+import type { Row } from "../src/types.js";
 import { assistantRow, toolResultRow, userRow } from "./helpers.js";
 
 describe("buildTurns", () => {
@@ -102,6 +103,40 @@ describe("buildTurns", () => {
 
   it("turn without assistant dropped", () => {
     assert.deepEqual(buildTurns([userRow("no reply yet")]), []);
+  });
+
+  // Claude Code writes `api-request-blob` rows: content-addressed copies of messages it sent to the
+  // API, carrying message.role but no message.id, model or usage. They are not new chat messages.
+  const blobRow = (role: string, content: any): Row => ({
+    type: "api-request-blob",
+    sessionId: "s1",
+    hash: `h_${role}_${JSON.stringify(content).length}`,
+    message: { role, content },
+  });
+
+  it("api-request-blob assistant copies are not extra assistant messages", () => {
+    const toolUse = { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } };
+    const turns = buildTurns([
+      userRow("run ls"),
+      assistantRow([toolUse], { msgId: "m1" }),
+      toolResultRow("tu_1", "file.txt"),
+      blobRow("assistant", [toolUse]),
+      assistantRow([{ type: "text", text: "done" }], { msgId: "m2", ts: "2026-07-08T10:00:15.000Z" }),
+    ]);
+    assert.equal(turns.length, 1);
+    // Without the fix the blob becomes a third, id-less assistant message re-emitting tu_1.
+    assert.equal(turns[0]!.assistantMsgs.length, 2);
+  });
+
+  it("api-request-blob user copies do not start turns", () => {
+    const turns = buildTurns([
+      userRow("first prompt"),
+      assistantRow([{ type: "text", text: "thinking" }], { msgId: "m1" }),
+      blobRow("user", [{ type: "text", text: "first prompt" }]),
+      assistantRow([{ type: "text", text: "answer" }], { msgId: "m2", ts: "2026-07-08T10:00:15.000Z" }),
+    ]);
+    assert.equal(turns.length, 1);
+    assert.equal(turns[0]!.assistantMsgs.length, 2);
   });
 });
 
