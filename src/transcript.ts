@@ -18,11 +18,19 @@ export function getContentFromRow(row: Row): Json {
 }
 
 export function getUserOrAssistantRoleFromRow(row: Row): string | null {
-  // Prefer top-level row.type when it marks a chat row, then fall back to
-  // nested message.role.
+  // Prefer top-level row.type when it marks a chat row. Fall back to nested
+  // message.role only for rows with no type at all: typed non-chat rows can
+  // embed a message too. Claude Code's `api-request-blob` rows are
+  // content-addressed copies of messages already sent to the API, with
+  // message.role but no message.id, model or usage. Read as chat rows, an
+  // assistant copy becomes an extra zero-token generation that re-emits its
+  // tool_use blocks as duplicate tool spans, and a user copy starts a bogus turn.
   const rowType = row.type;
   if (rowType === "user" || rowType === "assistant") {
     return rowType;
+  }
+  if (rowType !== undefined && rowType !== null) {
+    return null;
   }
   const message = row.message;
   if (typeof message === "object" && message !== null) {

@@ -25147,6 +25147,9 @@ function getUserOrAssistantRoleFromRow(row) {
   if (rowType === "user" || rowType === "assistant") {
     return rowType;
   }
+  if (rowType !== void 0 && rowType !== null) {
+    return null;
+  }
   const message = row.message;
   if (typeof message === "object" && message !== null) {
     const role = message.role;
