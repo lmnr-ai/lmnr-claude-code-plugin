@@ -1,7 +1,7 @@
 {
   "name": "lmnr",
   "displayName": "Laminar",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Trace Claude Code sessions in Laminar. After each turn, sends your prompts, Claude's responses, tool calls with their inputs and outputs, and subagent activity to your Laminar project as OpenTelemetry traces.",
   "author": {
     "name": "Laminar",
