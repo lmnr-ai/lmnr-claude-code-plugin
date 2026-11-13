@@ -1,5 +1,6 @@
 {
   "name": "lmnr",
+  "description": "Laminar plugins for Claude Code.",
   "owner": {
     "name": "Laminar",
     "email": "founders@lmnr.ai",
@@ -9,7 +10,7 @@
     {
       "name": "lmnr",
       "source": "./",
-      "description": "Trace Claude Code sessions in Laminar: conversational turns, LLM calls, tool executions, and subagents."
+      "description": "Trace Claude Code sessions in Laminar. After each turn, sends your prompts, Claude's responses, tool calls with their inputs and outputs, and subagent activity to your Laminar project as OpenTelemetry traces."
     }
   ]
 }

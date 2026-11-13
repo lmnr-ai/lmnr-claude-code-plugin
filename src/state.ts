@@ -1,213 +1,213 @@
+/**
+ * Per-session state between hook runs: a small JSON file per session plus an O_EXCL
+ * lock. Only offsets and counters; transcript rows are re-read, never stored.
+ */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import lockfile from "proper-lockfile";
-import { lockFile, stateDir, stateFile } from "./config.js";
-import { info } from "./logger.js";
+import * as path from "node:path";
+import { info, readJsonObject, stateDir } from "./config.js";
 import { coerceToolSetChanges, type ToolSetChange } from "./tools.js";
-import type { Json, Row } from "./types.js";
+import { isPrompt, readLines, type Row } from "./transcript.js";
 
-export type GlobalState = Record<string, any>;
-
-/**
- * A turn deferred until its async agent (Task/Agent) reports back. `rows` are
- * the raw transcript rows to rebuild it from; `pendingToolUseIds` are the
- * launches still awaiting a task-notification, moving to `resolvedToolUseIds`
- * as each arrives (they keep matching so repeat notifications still route here).
- */
-export interface PendingAgentTurn {
-  pendingToolUseIds: string[];
-  resolvedToolUseIds: string[];
-  rows: Row[];
-}
-
-/** Untrusted disk value → Row[] (raw transcript rows pass through as-is). */
-function coerceRows(value: unknown): Row[] {
-  return Array.isArray(value) ? (value as Row[]) : [];
-}
-
-/**
- * Untrusted disk value → PendingAgentTurn[]. Unlike the scalar fields, these
- * carry a nested shape, so validate it here rather than trusting Array.isArray
- * and letting a malformed entry surface deep inside deferral.ts.
- */
-function coercePendingAgentTurns(value: unknown): PendingAgentTurn[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const out: PendingAgentTurn[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
-      continue;
-    }
-    const e = entry as Record<string, unknown>;
-    if (!Array.isArray(e.pendingToolUseIds) || !Array.isArray(e.resolvedToolUseIds) || !Array.isArray(e.rows)) {
-      continue;
-    }
-    out.push({
-      pendingToolUseIds: e.pendingToolUseIds.filter((x): x is string => typeof x === "string"),
-      resolvedToolUseIds: e.resolvedToolUseIds.filter((x): x is string => typeof x === "string"),
-      rows: coerceRows(e.rows),
-    });
-  }
-  return out;
-}
-
-/** Per-session state persisted between hook runs. */
-export class SessionState {
-  offset: number; // Last byte read from the transcript file.
-  buffer: string; // Partial JSONL line kept between hook runs.
-  turnCount: number; // Turns already emitted for this session.
-  pendingAgentTurns: PendingAgentTurn[];
-  // Task-notification rows whose tool_use_id could not be resolved yet
-  // (task-id-only and the subagent meta.json not on disk); retried each run.
-  pendingTaskNotifications: Row[];
-  // Raw rows of an incomplete trailing turn (a user prompt whose assistant
-  // response has not been written yet) held back so the next hook run re-reads
-  // it together with the response. Guards against the transcript being flushed
-  // between the Stop hook firing and the assistant row landing.
-  pendingTurnRows: Row[];
-  // When each tool set came into effect (sets themselves live in tools.ts's
-  // shared directory). Snapshots are written only on change, so later hook
-  // runs need this to know which tools a generation was offered.
+export interface SessionState {
+  // First turn not exported yet (or the end of the last row read); each run re-reads from here.
+  offset: number;
+  // Turns past `offset` already exported (they went out while an earlier one waited).
+  exported: number[];
+  turnCount: number;
+  // Rows before this offset were already fed to the tool timeline.
+  toolsScannedTo: number;
+  // When each tool set took effect (the sets themselves are stored by tools.ts).
   toolSetChanges: ToolSetChange[];
-
-  constructor(init: Partial<SessionState> = {}) {
-    this.offset = init.offset ?? 0;
-    this.buffer = init.buffer ?? "";
-    this.turnCount = init.turnCount ?? 0;
-    this.pendingAgentTurns = init.pendingAgentTurns ?? [];
-    this.pendingTaskNotifications = init.pendingTaskNotifications ?? [];
-    this.pendingTurnRows = init.pendingTurnRows ?? [];
-    this.toolSetChanges = init.toolSetChanges ?? [];
-  }
-
-  /** Rebuild from the untrusted on-disk shape, coercing every persisted field. */
-  static fromJSON(raw: unknown): SessionState {
-    const s = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
-    return new SessionState({
-      offset: Number(s.offset ?? 0),
-      buffer: String(s.buffer ?? ""),
-      turnCount: Number(s.turnCount ?? 0),
-      pendingAgentTurns: coercePendingAgentTurns(s.pendingAgentTurns),
-      pendingTaskNotifications: coerceRows(s.pendingTaskNotifications),
-      pendingTurnRows: coerceRows(s.pendingTurnRows),
-      toolSetChanges: coerceToolSetChanges(s.toolSetChanges),
-    });
-  }
-
-  /** Project to the persisted shape. The `updated` bookkeeping field is stamped by the writer. */
-  toJSON(): Record<string, Json> {
-    return {
-      offset: this.offset,
-      buffer: this.buffer,
-      turnCount: this.turnCount,
-      pendingAgentTurns: this.pendingAgentTurns as unknown as Json,
-      pendingTaskNotifications: this.pendingTaskNotifications as unknown as Json,
-      pendingTurnRows: this.pendingTurnRows as unknown as Json,
-      toolSetChanges: this.toolSetChanges as unknown as Json,
-    };
-  }
 }
 
-export function loadHookState(): GlobalState {
+const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// A Stop run holds Claude Code up while it waits, and whatever it skips goes out
+// on a later run; SessionEnd is the last run, so it waits out a slow export.
+export const LOCK_WAIT_MS = 10_000;
+export const LOCK_WAIT_SESSION_END_MS = 60_000;
+// The holder touches its lock while it runs; one untouched this long was left
+// by a killed run.
+const LOCK_STALE_MS = 30_000;
+const LOCK_HEARTBEAT_MS = 5_000;
+
+export interface LockTiming {
+  waitMs?: number;
+  staleMs?: number;
+  heartbeatMs?: number;
+}
+
+const sessionsDir = () => path.join(stateDir(), "lmnr_sessions");
+
+export function sessionKey(sessionId: string, transcriptPath: string): string {
+  return crypto.createHash("sha256").update(`${sessionId}::${transcriptPath}`, "utf-8").digest("hex");
+}
+
+export function emptyState(): SessionState {
+  return { offset: 0, exported: [], turnCount: 0, toolsScannedTo: 0, toolSetChanges: [] };
+}
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+
+function fromJson(raw: Record<string, any>): SessionState {
+  return {
+    offset: num(raw.offset),
+    exported: Array.isArray(raw.exported) ? raw.exported.filter((x: unknown) => typeof x === "number") : [],
+    turnCount: num(raw.turnCount),
+    toolsScannedTo: num(raw.toolsScannedTo),
+    toolSetChanges: coerceToolSetChanges(raw.toolSetChanges),
+  };
+}
+
+export function loadState(key: string, transcriptPath: string): SessionState {
+  const file = path.join(sessionsDir(), `${key}.json`);
+  if (fs.existsSync(file)) {
+    return fromJson(readJsonObject(file));
+  }
+  pruneOldSessions();
+  return migrateLegacyState(key, transcriptPath) ?? emptyState();
+}
+
+/** Persist the state. Fail-open: a failed write means the next run re-exports (at-least-once). */
+export function saveState(key: string, state: SessionState): void {
   try {
-    const file = stateFile();
-    if (!fs.existsSync(file)) {
-      return {};
-    }
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-export function getSessionStateKey(sessionId: string, transcriptPath: string): string {
-  // Stable key even if session_id collides.
-  const raw = `${sessionId}::${transcriptPath}`;
-  return crypto.createHash("sha256").update(raw, "utf-8").digest("hex");
-}
-
-export function getSessionState(globalState: GlobalState, key: string): SessionState {
-  return SessionState.fromJSON(globalState[key]);
-}
-
-export function updateSessionState(globalState: GlobalState, key: string, sessionState: SessionState): void {
-  globalState[key] = { ...sessionState.toJSON(), updated: new Date().toISOString() };
-}
-
-export function saveHookState(state: GlobalState): void {
-  try {
-    // Drop session entries older than 30 days to keep the file bounded.
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    for (const k of Object.keys(state)) {
-      const entry = state[k];
-      if (typeof entry !== "object" || entry === null) {
-        continue;
-      }
-      const updated = entry.updated;
-      if (typeof updated !== "string") {
-        continue;
-      }
-      const ts = Date.parse(updated);
-      if (Number.isNaN(ts)) {
-        continue;
-      }
-      if (ts < cutoff) {
-        delete state[k];
-      }
-    }
-    const file = stateFile();
-    fs.mkdirSync(stateDir(), { recursive: true });
-    const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
-    fs.renameSync(tmp, file);
+    fs.mkdirSync(sessionsDir(), { recursive: true });
+    const file = path.join(sessionsDir(), `${key}.json`);
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(state), "utf-8");
+    fs.renameSync(`${file}.tmp`, file);
   } catch (e) {
-    // Fail-open: never throw. Exports can't be rolled back, so a failed state
-    // write after a successful export means those turns will be re-emitted as
-    // duplicate traces on the next hook run (at-least-once).
-    info(
-      `saveHookState failed: ${e}; state not persisted — ` +
-        "already-exported turns may be re-emitted as duplicates on the next hook run"
-    );
+    info(`saveState failed: ${e}; already-exported turns may be re-emitted on the next hook run`);
   }
 }
 
-export function saveSessionState(globalState: GlobalState, key: string, sessionState: SessionState): void {
-  updateSessionState(globalState, key, sessionState);
-  saveHookState(globalState);
+function pruneOldSessions(): void {
+  try {
+    const cutoff = Date.now() - MAX_AGE_MS;
+    for (const name of fs.readdirSync(sessionsDir())) {
+      const file = path.join(sessionsDir(), name);
+      if (fs.statSync(file).mtimeMs < cutoff) {
+        fs.rmSync(file, { force: true });
+      }
+    }
+  } catch {
+    // Nothing to prune yet.
+  }
 }
 
 /**
- * Advisory lock over the shared state file so concurrent hook runs don't
- * corrupt it. Throws on failure (caller fails open, exits 0), mirroring the
- * Python FileLock's TimeoutError path.
+ * Serialize overlapping hook runs for a session. Throws on timeout; runs unlocked
+ * if the lock file can't be created. A run holds the lock through its exports
+ * (each up to EXPORT_TIMEOUT_MS), so it keeps the lock fresh while alive.
  */
-export async function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
-  const lock = lockFile();
-  fs.mkdirSync(stateDir(), { recursive: true });
-  // proper-lockfile stats the target, so it must exist.
+export async function withSessionLock<T>(key: string, fn: () => Promise<T>, timing: LockTiming = {}): Promise<T> {
+  const { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE_MS, heartbeatMs = LOCK_HEARTBEAT_MS } = timing;
+  const lock = path.join(sessionsDir(), `${key}.lock`);
   try {
-    fs.closeSync(fs.openSync(lock, "a"));
+    fs.mkdirSync(sessionsDir(), { recursive: true });
   } catch {
-    // If we can't even create the lock file, run without a lock (fail-open).
     return fn();
   }
-  let release: (() => Promise<void>) | null = null;
-  try {
-    release = await lockfile.lock(lock, {
-      realpath: false,
-      stale: 30_000,
-      // ~2s of polling (40 * 50ms), matching the Python 2s lock timeout.
-      retries: { retries: 40, minTimeout: 50, maxTimeout: 50 },
-    });
-    return await fn();
-  } finally {
-    if (release) {
-      try {
-        await release();
-      } catch {
-        // Ignore release failures.
+  const token = `${process.pid}:${crypto.randomBytes(8).toString("hex")}`;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    let fd: number | null = null;
+    try {
+      fd = fs.openSync(lock, "wx");
+      fs.writeSync(fd, token);
+      fs.closeSync(fd);
+      break;
+    } catch (e: any) {
+      if (fd !== null) {
+        // Created but not stamped: nobody could ever release it, so undo it.
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // already closed
+        }
+        try {
+          fs.rmSync(lock, { force: true });
+        } catch {
+          // left to go stale
+        }
+        return fn();
+      }
+      if (e?.code !== "EEXIST") {
+        return fn();
       }
     }
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > staleMs) {
+        fs.rmSync(lock, { force: true }); // left by a killed run
+        continue;
+      }
+    } catch {
+      continue; // released meanwhile
+    }
+    if (Date.now() > deadline) {
+      throw new Error("session state lock timeout");
+    }
+    await new Promise((r) => setTimeout(r, 50));
   }
+  // Only ever touch or remove our own lock: after a takeover the file is another run's.
+  const ours = () => {
+    try {
+      return fs.readFileSync(lock, "utf-8") === token;
+    } catch {
+      return false;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    try {
+      if (ours()) {
+        const now = new Date();
+        fs.utimesSync(lock, now, now);
+      }
+    } catch {
+      // A missed beat only matters past staleMs.
+    }
+  }, heartbeatMs);
+  heartbeat.unref();
+  try {
+    return await fn();
+  } finally {
+    clearInterval(heartbeat);
+    if (ours()) {
+      fs.rmSync(lock, { force: true });
+    }
+  }
+}
+
+/**
+ * One-time upgrade from the pre-rewrite shared `lmnr_state.json`: resume at the
+ * earliest turn it still held (found by uuid), and mark the later prompts it had
+ * read as exported, so the session's history isn't sent again.
+ */
+function migrateLegacyState(key: string, transcriptPath: string): SessionState | null {
+  const legacy = readJsonObject(path.join(stateDir(), "lmnr_state.json"))[key];
+  if (typeof legacy !== "object" || legacy === null) {
+    return null;
+  }
+  const readTo = num(legacy.offset) - Buffer.byteLength(typeof legacy.buffer === "string" ? legacy.buffer : "", "utf-8");
+  const held: Row[] = [
+    ...(Array.isArray(legacy.pendingAgentTurns) ? legacy.pendingAgentTurns.map((t: any) => t?.rows?.[0]) : []),
+    Array.isArray(legacy.pendingTurnRows) ? legacy.pendingTurnRows[0] : undefined,
+  ];
+  const heldUuids = new Set(held.map((r) => r?.uuid).filter((u): u is string => typeof u === "string"));
+  const state: SessionState = {
+    ...emptyState(),
+    offset: Math.max(0, readTo),
+    turnCount: num(legacy.turnCount),
+    toolsScannedTo: Math.max(0, readTo),
+    toolSetChanges: coerceToolSetChanges(legacy.toolSetChanges),
+  };
+  if (heldUuids.size > 0) {
+    const prompts = readLines(transcriptPath).lines.filter((l) => l.offset < readTo && isPrompt(l.row));
+    const firstHeld = prompts.find((l) => heldUuids.has(l.row.uuid));
+    if (firstHeld) {
+      state.offset = firstHeld.offset;
+      state.exported = prompts.filter((l) => l.offset > firstHeld.offset && !heldUuids.has(l.row.uuid)).map((l) => l.offset);
+    }
+  }
+  info(`migrated legacy state for session ${key.slice(0, 12)}: resuming at byte ${state.offset}`);
+  return state;
 }
