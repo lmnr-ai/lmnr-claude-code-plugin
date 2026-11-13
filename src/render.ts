@@ -4,7 +4,7 @@
  */
 import * as path from "node:path";
 import { CAPTURE_SKILL_CONTENT, type LaminarConfig } from "./config.js";
-import { buildGenerationAttributes, buildUserMessage, toAnthropicContent, toolResultBlock } from "./genai.js";
+import { buildGenerationAttributes, buildUserMessage, toAnthropicContent, toolResultBlock, truncateStrings } from "./genai.js";
 import { endSpan, setAttributes, type Attrs, type Span, type Tracer } from "./otlp.js";
 import { ToolTimeline } from "./tools.js";
 import {
@@ -207,7 +207,7 @@ function toolInput(toolUse: Row): any {
   if (typeof raw === "string") {
     return truncate(raw);
   }
-  return raw !== null && ["object", "number", "boolean"].includes(typeof raw) ? raw : {};
+  return raw !== null && ["object", "number", "boolean"].includes(typeof raw) ? truncateStrings(raw) : {};
 }
 
 /** A tool result as span output; block arrays get the LLM-message bounds (images → markers). */

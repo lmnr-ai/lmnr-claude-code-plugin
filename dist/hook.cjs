@@ -505,8 +505,10 @@ var env = (name) => process.env[name] ?? "";
 var nonEmpty = (v) => typeof v === "string" ? v : "";
 var DEBUG = env("CC_LMNR_DEBUG").toLowerCase() === "true";
 var CAPTURE_SKILL_CONTENT = env("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
-var MAX_CHARS = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10) || 2e4;
-var EXPORT_TIMEOUT_MS = 5e3;
+var maxChars = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10);
+var MAX_CHARS = maxChars > 0 ? maxChars : null;
+var MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+var EXPORT_TIMEOUT_MS = 3e4;
 function lmnrConfigDir() {
   if (process.env.XDG_CONFIG_HOME) {
     return path.join(process.env.XDG_CONFIG_HOME, "lmnr");
@@ -1980,7 +1982,7 @@ function toReadableSpan(s) {
     droppedLinksCount: 0
   };
 }
-var MAX_BATCH_BYTES = 4 * 1024 * 1024;
+var MAX_BATCH_BYTES = MAX_PAYLOAD_BYTES;
 var spanBytes = (span) => Buffer.byteLength(JSON.stringify(span.attributes)) + 512;
 function dropOtlpEnv() {
   for (const key of Object.keys(process.env)) {
@@ -2055,8 +2057,17 @@ function tsOf(value) {
   const ms = Date.parse(raw);
   return Number.isNaN(ms) ? null : ms;
 }
-function truncate(s, maxChars = MAX_CHARS) {
-  return s ? s.slice(0, maxChars) : "";
+var TRUNCATION_SUFFIX = "...[Laminar: truncated]";
+function truncate(s, maxChars2 = MAX_CHARS) {
+  if (!s) {
+    return "";
+  }
+  let out = maxChars2 !== null && s.length > maxChars2 ? s.slice(0, maxChars2) + TRUNCATION_SUFFIX : s;
+  if (Buffer.byteLength(out) > MAX_PAYLOAD_BYTES) {
+    const keep = MAX_PAYLOAD_BYTES - Buffer.byteLength(TRUNCATION_SUFFIX);
+    out = Buffer.from(out).subarray(0, keep).toString("utf-8").replace(/�$/, "") + TRUNCATION_SUFFIX;
+  }
+  return out;
 }
 function isToolResult(row) {
   return roleOf(row) === "user" && blocksOf(contentOf(row), "tool_result").length > 0;
@@ -2182,7 +2193,7 @@ function taskIdMap(subagents) {
 
 // src/genai.ts
 var USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
-var MAX_INPUT_BYTES = 2 * 1024 * 1024;
+var MAX_INPUT_BYTES = MAX_PAYLOAD_BYTES;
 function boundedHistoryJson(history) {
   const json = JSON.stringify(history);
   if (Buffer.byteLength(json) <= MAX_INPUT_BYTES || history.length < 2) {
@@ -2679,7 +2690,7 @@ function toolInput(toolUse) {
   if (typeof raw === "string") {
     return truncate(raw);
   }
-  return raw !== null && ["object", "number", "boolean"].includes(typeof raw) ? raw : {};
+  return raw !== null && ["object", "number", "boolean"].includes(typeof raw) ? truncateStrings(raw) : {};
 }
 function toolOutputText(raw) {
   return truncate(typeof raw === "string" ? raw : JSON.stringify(Array.isArray(raw) ? toAnthropicContent(raw) : raw));

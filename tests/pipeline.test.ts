@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { exportSpans } from "../src/otlp.js";
+import { MAX_PAYLOAD_BYTES } from "../src/config.js";
+import { exportSpans, MAX_BATCH_BYTES } from "../src/otlp.js";
+import { TRUNCATION_SUFFIX } from "../src/transcript.js";
 import { sessionKey } from "../src/state.js";
 import {
   assistantRow,
@@ -113,12 +115,13 @@ describe("incremental hook runs", () => {
 });
 
 describe("export batching", () => {
-  // A long turn repeats its growing history on every LLM span.
+  // A long turn repeats its growing history on every LLM span: 30 calls of 80 KB
+  // results come to ~37 MB, more than two requests' worth.
   const longTurn = (prompt: string, ts: string, calls: number) => {
     const rows: any[] = [userRow(prompt, ts)];
     for (let i = 0; i < calls; i++) {
       rows.push(assistantRow([{ type: "tool_use", id: `${prompt}-${i}`, name: "Read", input: {} }], { msgId: `${prompt}-m${i}`, ts }));
-      rows.push(toolResultRow(`${prompt}-${i}`, "x".repeat(20000), ts));
+      rows.push(toolResultRow(`${prompt}-${i}`, "x".repeat(80_000), ts));
     }
     rows.push(assistantRow(text("done"), { msgId: `${prompt}-end`, ts }));
     return rows;
@@ -133,7 +136,8 @@ describe("export batching", () => {
     const sizes = requests.map((r) => r.bytes);
     assert.equal(count, 1);
     assert.ok(sizes.length > 1, `one request of ${sizes[0]} bytes`);
-    assert.ok(Math.max(...sizes) < 5 * 1024 * 1024, `request sizes ${sizes}`);
+    // Each request holds at most MAX_BATCH_BYTES of estimated span size, plus envelope.
+    assert.ok(Math.max(...sizes) < MAX_BATCH_BYTES * 1.05, `request sizes ${sizes}`);
   });
 
   it("after a failed request, only the turns that didn't get through are retried", async () => {
@@ -147,7 +151,7 @@ describe("export batching", () => {
   });
 
   it("an input history too big for one span keeps the prompt and the latest messages", async () => {
-    const huge = Array.from({ length: 120 }, (_, i) => ({ type: "text", text: `${i}`.repeat(20000) }));
+    const huge = Array.from({ length: 900 }, (_, i) => ({ type: "text", text: `${i % 10}`.repeat(20_000) })); // 18 MB
     const s = open([
       userRow("read everything"),
       assistantRow([{ type: "tool_use", id: "t", name: "Read", input: {} }], { msgId: "m1" }),
@@ -159,6 +163,22 @@ describe("export batching", () => {
       { role: "user", content: text("read everything") },
       { role: "user", content: text("[2 earlier messages omitted]") },
     ]);
+  });
+});
+
+describe("field size", () => {
+  it("a tool input carrying a whole file is capped on the tool span too", async () => {
+    const content = "y".repeat(MAX_PAYLOAD_BYTES + 1000);
+    const s = open([
+      userRow("write it"),
+      assistantRow([{ type: "tool_use", id: "w", name: "Write", input: { file_path: "/a.txt", content } }], { msgId: "m1" }),
+      toolResultRow("w", "ok"),
+      assistantRow(text("done"), { msgId: "m2" }),
+    ]);
+    const input = json(spansByName((await s.end()).spans)["Write"], "lmnr.span.input");
+    assert.equal(input.file_path, "/a.txt");
+    assert.ok(input.content.endsWith(TRUNCATION_SUFFIX));
+    assert.ok(Buffer.byteLength(input.content) <= MAX_PAYLOAD_BYTES);
   });
 });
 

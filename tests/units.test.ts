@@ -3,11 +3,20 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { getLaminarConfig, MAX_CHARS } from "../src/config.js";
+import { getLaminarConfig, MAX_CHARS, MAX_PAYLOAD_BYTES } from "../src/config.js";
 import { buildGenerationAttributes, buildUserMessage, toolResultBlock } from "../src/genai.js";
 import { Tracer, endSpan, exportSpans } from "../src/otlp.js";
 import { mergeAssistantRows } from "../src/render.js";
-import { findSubagents, isTaskNotification, notificationResult, notificationToolUseId, readLines, taskIdMap } from "../src/transcript.js";
+import {
+  findSubagents,
+  isTaskNotification,
+  notificationResult,
+  notificationToolUseId,
+  readLines,
+  taskIdMap,
+  truncate,
+  TRUNCATION_SUFFIX,
+} from "../src/transcript.js";
 import { assistantRow, notificationRow, userRow, withCollector } from "./helpers.js";
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
@@ -241,11 +250,13 @@ describe("gen_ai serialization", () => {
     assert.equal(toolUses.length, 1);
   });
 
-  it("replaces images with a marker and truncates long strings", () => {
+  it("replaces images with a marker and keeps long strings whole by default", () => {
     const image = { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } };
-    const message = buildUserMessage(userRow([image, { type: "text", text: "x".repeat(MAX_CHARS + 10) }]));
+    const long = "x".repeat(100_000);
+    const message = buildUserMessage(userRow([image, { type: "text", text: long }]));
     assert.deepEqual(message.content[0], { type: "text", text: "[image]" });
-    assert.equal(message.content[1].text.length, MAX_CHARS);
+    assert.equal(MAX_CHARS, null); // CC_LMNR_MAX_CHARS is opt-in
+    assert.equal(message.content[1].text, long);
     assert.deepEqual(toolResultBlock("t1", [image], false).content, [{ type: "text", text: "[image]" }]);
     assert.deepEqual(toolResultBlock("t2", "boom", true), { type: "tool_result", tool_use_id: "t2", content: "boom", is_error: true });
   });
@@ -256,5 +267,21 @@ describe("gen_ai serialization", () => {
       { type: "text", text: "first" },
       { type: "text", text: "second" },
     ]);
+  });
+});
+
+describe("truncation", () => {
+  it("cuts at CC_LMNR_MAX_CHARS characters only when the user sets it", () => {
+    assert.equal(truncate("abcdef", null), "abcdef");
+    assert.equal(truncate("abcdef", 4), `abcd${TRUNCATION_SUFFIX}`);
+    assert.equal(truncate("abcd", 4), "abcd");
+  });
+
+  it("cuts at MAX_PAYLOAD_BYTES of UTF-8, never inside a character", () => {
+    const cut = truncate("é".repeat(MAX_PAYLOAD_BYTES), null); // 2 bytes each
+    assert.ok(cut.endsWith(TRUNCATION_SUFFIX));
+    assert.ok(Buffer.byteLength(cut) <= MAX_PAYLOAD_BYTES, `${Buffer.byteLength(cut)} bytes`);
+    assert.ok(!cut.includes("\uFFFD"));
+    assert.equal(truncate("é".repeat(1000), null), "é".repeat(1000));
   });
 });

@@ -13,9 +13,16 @@ const nonEmpty = (v: unknown): string => (typeof v === "string" ? v : "");
 
 export const DEBUG = env("CC_LMNR_DEBUG").toLowerCase() === "true";
 export const CAPTURE_SKILL_CONTENT = env("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
-export const MAX_CHARS = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10) || 20000;
-// Cap for the OTLP request (connect + response).
-export const EXPORT_TIMEOUT_MS = 5000;
+// Opt-in cap on each captured string, in characters; unset (the default) means none.
+const maxChars = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10);
+export const MAX_CHARS: number | null = maxChars > 0 ? maxChars : null;
+// Size limit, in UTF-8 bytes, for one export request, one captured string and one
+// LLM call's input history. Laminar's cloud accepts 50 MB requests; a self-hosted
+// app-server's HTTP_PAYLOAD_LIMIT defaults to 5 MiB and must be raised to match.
+export const MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+// Cap for one OTLP request, retries included: long enough to upload
+// MAX_PAYLOAD_BYTES on a slow uplink.
+export const EXPORT_TIMEOUT_MS = 30_000;
 
 /** Where `lmnr-cli` keeps its files. */
 function lmnrConfigDir(): string {

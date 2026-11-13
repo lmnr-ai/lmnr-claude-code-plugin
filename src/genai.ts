@@ -2,11 +2,12 @@
  * `gen_ai.*` attributes in Anthropic Messages API shape, bounded in size: long strings
  * truncated, thinking signatures dropped, images and documents replaced by markers.
  */
+import { MAX_PAYLOAD_BYTES } from "./config.js";
 import { blocksOf, contentOf, truncate, type Row } from "./transcript.js";
 
 const USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
-// A generation's input stays under this so its span fits in one export request.
-const MAX_INPUT_BYTES = 2 * 1024 * 1024;
+// A generation's input history stays under this, so one span stays within about one request.
+const MAX_INPUT_BYTES = MAX_PAYLOAD_BYTES;
 
 /** The history as JSON; past MAX_INPUT_BYTES the oldest messages after the prompt become a note. */
 function boundedHistoryJson(history: Row[]): string {
@@ -25,7 +26,7 @@ function boundedHistoryJson(history: Row[]): string {
 }
 
 /** Truncate every string in a JSON value (tool inputs can carry whole files). */
-function truncateStrings(value: any): any {
+export function truncateStrings(value: any): any {
   if (typeof value === "string") {
     return truncate(value);
   }

@@ -4,7 +4,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { info, MAX_CHARS } from "./config.js";
+import { info, MAX_CHARS, MAX_PAYLOAD_BYTES } from "./config.js";
 
 export type Row = Record<string, any>;
 
@@ -53,8 +53,25 @@ export function tsOf(value: any): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-export function truncate(s: string | null | undefined, maxChars = MAX_CHARS): string {
-  return s ? s.slice(0, maxChars) : "";
+// Marks a cut string; the same suffix the Laminar SDKs use.
+export const TRUNCATION_SUFFIX = "...[Laminar: truncated]";
+
+/**
+ * Bound a captured string: at MAX_PAYLOAD_BYTES of UTF-8, and at `maxChars`
+ * characters when the user opts in (CC_LMNR_MAX_CHARS). A cut string ends in
+ * TRUNCATION_SUFFIX.
+ */
+export function truncate(s: string | null | undefined, maxChars: number | null = MAX_CHARS): string {
+  if (!s) {
+    return "";
+  }
+  let out = maxChars !== null && s.length > maxChars ? s.slice(0, maxChars) + TRUNCATION_SUFFIX : s;
+  if (Buffer.byteLength(out) > MAX_PAYLOAD_BYTES) {
+    const keep = MAX_PAYLOAD_BYTES - Buffer.byteLength(TRUNCATION_SUFFIX);
+    // A cut inside a multi-byte character decodes to U+FFFD; drop it.
+    out = Buffer.from(out).subarray(0, keep).toString("utf-8").replace(/�$/, "") + TRUNCATION_SUFFIX;
+  }
+  return out;
 }
 
 export function isToolResult(row: Row): boolean {

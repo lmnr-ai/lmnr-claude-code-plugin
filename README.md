@@ -66,8 +66,9 @@ The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
 file when set (handy for CI or a shell you already have configured).
 
 Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
-to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` caps per-field capture
-length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
+to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` cuts every captured
+string to that many characters (off by default: strings are kept whole up to
+16 MiB); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
 (used by the test suite).
 
 ## How it works

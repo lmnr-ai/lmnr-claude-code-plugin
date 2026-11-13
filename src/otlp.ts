@@ -8,7 +8,7 @@ import { SpanKind, SpanStatusCode, TraceFlags, type HrTime } from "@opentelemetr
 import { ExportResultCode, type ExportResult } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { debug, EXPORT_TIMEOUT_MS, info, type LaminarConfig } from "./config.js";
+import { debug, EXPORT_TIMEOUT_MS, info, MAX_PAYLOAD_BYTES, type LaminarConfig } from "./config.js";
 
 export type AttrValue = string | number | boolean;
 export type Attrs = Record<string, AttrValue | null | undefined>;
@@ -128,9 +128,10 @@ export function toReadableSpan(s: Span): ReadableSpan {
   };
 }
 
-// app-server rejects request bodies over its HTTP_PAYLOAD_LIMIT (5 MB by
-// default, measured after decompression), so exports go out in batches below it.
-export const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+// app-server rejects request bodies over its HTTP_PAYLOAD_LIMIT (measured after
+// decompression), so exports go out in batches below it. A single span bigger
+// than this still goes out, alone.
+export const MAX_BATCH_BYTES = MAX_PAYLOAD_BYTES;
 
 /** Rough serialized size of a span: its attributes plus envelope overhead. */
 export const spanBytes = (span: Span): number => Buffer.byteLength(JSON.stringify(span.attributes)) + 512;
