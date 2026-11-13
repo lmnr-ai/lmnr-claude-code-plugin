@@ -66,17 +66,20 @@ The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
 file when set (handy for CI or a shell you already have configured).
 
 Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
-to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` caps per-field capture
-length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
+to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` cuts every captured
+string to that many characters (off by default: strings are kept whole up to
+16 MiB); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
 (used by the test suite).
 
 ## How it works
 
 - **Stop hook** — fires after each assistant response; the plugin reads the new
-  portion of the transcript (tracked by byte offset in
-  `~/.claude/state/lmnr_state.json`), assembles complete turns, and emits them.
+  portion of the transcript (tracked by byte offset in a per-session file under
+  `~/.claude/state/lmnr_sessions/`), assembles complete turns, and emits them.
 - **SessionEnd hook** — flushes any turns still deferred (e.g. waiting for
-  background agent notifications).
+  background agent notifications, or the final turn of a `claude -p` run). Claude
+  Code allows SessionEnd hooks only 1.5 s, so the hook hands this export to a
+  detached background process and returns immediately.
 - Turns that launched an async agent are deferred until the agent's task
   notification arrives, so the subagent's full trace lands under the right
   tool span.
