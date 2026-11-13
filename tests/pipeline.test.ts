@@ -86,6 +86,30 @@ describe("incremental hook runs", () => {
     assert.deepEqual(turnNames(spans), [ROOT]);
     assert.deepEqual(json(spans.find((x) => x.name === ROOT), "lmnr.span.input"), { role: "user", content: "hello" });
   });
+
+  it("Claude Code's api-request-blob rows are not messages: they neither open turns nor add generations", async () => {
+    // Claude Code ≥2.1.305 records each API request's content as untimestamped,
+    // hash-addressed blob rows carrying message.role, right after the prompt.
+    const blob = (role: string, content: any) => ({ type: "api-request-blob", hash: `h-${role}`, message: { role, content } });
+    const s = open([
+      userRow("hello"),
+      { type: "api-request-shape", timestamp: "2026-07-08T10:00:00.500Z", shape: "{}" },
+      blob("user", text("<system-reminder>\ncontext Claude Code injected\n</system-reminder>")),
+      blob("system", text("SessionStart hook output")),
+      blob("assistant", [{ type: "tool_use", id: "toolu_blob", name: "Bash", input: {} }]),
+      { type: "api-request", timestamp: "2026-07-08T10:00:00.500Z" },
+      assistantRow(text("hi")),
+    ]);
+    const { spans } = await s.end();
+    assert.deepEqual(turnNames(spans), [ROOT]);
+    const root = spans.find((x) => x.name === ROOT)!;
+    assert.deepEqual(json(root, "lmnr.span.input"), { role: "user", content: "hello" });
+    assert.equal(root.startMs, Date.parse("2026-07-08T10:00:00.000Z"));
+    assert.deepEqual(
+      spans.map((x) => x.name),
+      [ROOT, "LLM Call 1"]
+    );
+  });
 });
 
 describe("export batching", () => {

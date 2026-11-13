@@ -16,6 +16,11 @@ export function roleOf(row: Row): "user" | "assistant" | null {
   if (row.type === "user" || row.type === "assistant") {
     return row.type;
   }
+  // Other row types aren't messages even when they carry one: `api-request-blob`
+  // rows (Claude Code ≥2.1.305) hold copies of request content with message.role.
+  if (row.type !== undefined) {
+    return null;
+  }
   const role = row.message?.role;
   return role === "user" || role === "assistant" ? role : null;
 }

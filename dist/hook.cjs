@@ -2028,6 +2028,9 @@ function roleOf(row) {
   if (row.type === "user" || row.type === "assistant") {
     return row.type;
   }
+  if (row.type !== void 0) {
+    return null;
+  }
   const role = row.message?.role;
   return role === "user" || role === "assistant" ? role : null;
 }
