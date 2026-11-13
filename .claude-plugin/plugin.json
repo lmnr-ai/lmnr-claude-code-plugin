@@ -1,14 +1,19 @@
 {
   "name": "lmnr",
-  "version": "0.1.0",
-  "description": "Trace Claude Code sessions in Laminar: conversational turns, LLM calls, tool executions, and subagents.",
+  "displayName": "Laminar",
+  "version": "0.1.1",
+  "description": "Trace Claude Code sessions in Laminar. After each turn, sends your prompts, Claude's responses, tool calls with their inputs and outputs, and subagent activity to your Laminar project as OpenTelemetry traces.",
   "author": {
     "name": "Laminar",
     "email": "founders@lmnr.ai",
-    "url": "https://www.lmnr.ai"
+    "url": "https://laminar.sh"
   },
   "homepage": "https://github.com/lmnr-ai/lmnr-claude-code-plugin",
   "repository": "https://github.com/lmnr-ai/lmnr-claude-code-plugin",
+  "documentationUrl": "https://laminar.sh/docs/tracing/integrations/claude-code",
+  "supportUrl": "https://github.com/lmnr-ai/lmnr-claude-code-plugin/issues",
+  "privacyPolicyUrl": "https://laminar.sh/policies/privacy",
+  "termsOfServiceUrl": "https://laminar.sh/policies/terms",
   "license": "Apache-2.0",
   "keywords": ["observability", "tracing", "laminar", "opentelemetry"]
 }
