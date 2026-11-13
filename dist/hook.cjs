@@ -493,6 +493,7 @@ var init_esm = __esm({
 });
 
 // src/hook.ts
+var import_node_child_process = require("node:child_process");
 var fs7 = __toESM(require("node:fs"), 1);
 var path7 = __toESM(require("node:path"), 1);
 
@@ -3088,13 +3089,31 @@ async function processTranscript(config, sessionId, transcriptPath, opts = {}) {
 }
 
 // src/hook.ts
+var WORKER_FLAG = "--session-end-worker";
 function readPayload() {
   try {
-    const payload = JSON.parse(fs7.readFileSync(0, "utf-8"));
+    const raw = process.argv[2] === WORKER_FLAG ? process.argv[3] ?? "" : fs7.readFileSync(0, "utf-8");
+    const payload = JSON.parse(raw);
     return typeof payload === "object" && payload !== null ? payload : {};
   } catch (e) {
     debug(`unreadable hook payload: ${e}`);
     return {};
+  }
+}
+function detachSessionEnd(sessionId, transcriptPath) {
+  try {
+    const payload = JSON.stringify({ session_id: sessionId, transcript_path: transcriptPath, hook_event_name: "SessionEnd" });
+    const child = (0, import_node_child_process.spawn)(process.execPath, [...process.execArgv, process.argv[1], WORKER_FLAG, payload], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    child.on("error", (e) => debug(`SessionEnd worker failed: ${e}`));
+    child.unref();
+    return child.pid !== void 0;
+  } catch (e) {
+    debug(`could not start the SessionEnd worker: ${e}`);
+    return false;
   }
 }
 async function main() {
@@ -3110,8 +3129,13 @@ async function main() {
     debug(`missing session_id or transcript (${transcriptPath}); nothing to do`);
     return;
   }
+  const sessionEnd = payload.hook_event_name === "SessionEnd";
+  if (sessionEnd && process.argv[2] !== WORKER_FLAG && detachSessionEnd(sessionId, path7.resolve(transcriptPath))) {
+    debug(`SessionEnd export handed to a detached worker (session=${sessionId})`);
+    return;
+  }
   const count = await processTranscript(config, sessionId, path7.resolve(transcriptPath), {
-    sessionEnd: payload.hook_event_name === "SessionEnd",
+    sessionEnd,
     finalAssistantText: typeof payload.last_assistant_message === "string" ? payload.last_assistant_message : ""
   });
   info(`Processed ${count} turns in ${((Date.now() - start) / 1e3).toFixed(2)}s (session=${sessionId})`);

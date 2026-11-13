@@ -16,8 +16,12 @@ export interface CollectedRequest {
   body: any;
 }
 
-/** Run `fn` against a local OTLP endpoint answering `status`; returns the requests it got. */
-export async function withCollector(status: number, fn: (config: LaminarConfig) => Promise<void>): Promise<CollectedRequest[]> {
+/** Run `fn` against a local OTLP endpoint answering `status` (after `delayMs`); returns the requests it got. */
+export async function withCollector(
+  status: number,
+  fn: (config: LaminarConfig) => Promise<void>,
+  { delayMs = 0 }: { delayMs?: number } = {}
+): Promise<CollectedRequest[]> {
   const received: CollectedRequest[] = [];
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -26,7 +30,7 @@ export async function withCollector(status: number, fn: (config: LaminarConfig) 
       const raw = Buffer.concat(chunks);
       received.push({ url: req.url, headers: req.headers, bytes: raw.length, body: JSON.parse(raw.toString()) });
       res.statusCode = status;
-      res.end("{}");
+      setTimeout(() => res.end("{}"), delayMs);
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

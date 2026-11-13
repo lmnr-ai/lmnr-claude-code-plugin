@@ -76,7 +76,9 @@ length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
   portion of the transcript (tracked by byte offset in a per-session file under
   `~/.claude/state/lmnr_sessions/`), assembles complete turns, and emits them.
 - **SessionEnd hook** — flushes any turns still deferred (e.g. waiting for
-  background agent notifications).
+  background agent notifications, or the final turn of a `claude -p` run). Claude
+  Code allows SessionEnd hooks only 1.5 s, so the hook hands this export to a
+  detached background process and returns immediately.
 - Turns that launched an async agent are deferred until the agent's task
   notification arrives, so the subagent's full trace lands under the right
   tool span.
