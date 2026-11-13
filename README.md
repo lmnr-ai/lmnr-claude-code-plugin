@@ -9,11 +9,13 @@ The plugin does nothing until you configure a Laminar project API key (see
 `Stop` and `SessionEnd` hooks in every session. Each time, it reads the new part
 of the session transcript and sends the completed turns to your Laminar project
 as OpenTelemetry traces. They go to `https://api.lmnr.ai`, or to the `baseUrl`
-you configure for a self-hosted Laminar.
+you configure for a self-hosted Laminar. At session end, the upload runs in a
+short-lived background process, so it can finish after Claude Code exits.
 
 Each trace contains:
 
-- your prompt and Claude's text responses
+- your prompt, Claude's text responses, and Claude's thinking text when the
+  model returns it
 - every tool call, with its input and output. Tool calls can include file
   contents, command output, and fetched web pages
 - subagent activity, read from the subagent transcripts Claude Code writes
@@ -29,9 +31,9 @@ Each trace contains:
   `lmnr-cli`, the email address (or user id) stored in
   `~/.config/lmnr/credentials.json`
 
-The plugin caps each text field at 20,000 characters (`CC_LMNR_MAX_CHARS`). It
-sends data only to the Laminar endpoint above: no analytics or other
-third-party calls. Laminar stores the traces in your project under the
+Images and documents are not sent: each is replaced by an `[image]` or
+`[document]` placeholder. The plugin sends data only to the Laminar endpoint
+above: no analytics or other third-party calls. Laminar stores the traces in your project under the
 [Laminar privacy policy](https://laminar.sh/policies/privacy).
 
 To stop sending traces, disable the plugin (`claude plugin disable lmnr@lmnr`)
