@@ -1,6 +1,43 @@
 # Laminar plugin for Claude Code
 
-Trace your [Claude Code](https://claude.com/claude-code) sessions in [Laminar](https://www.lmnr.ai).
+Trace your [Claude Code](https://claude.com/claude-code) sessions in [Laminar](https://laminar.sh).
+
+## What the plugin sends, and where
+
+The plugin does nothing until you configure a Laminar project API key (see
+[Installation](#installation)). Once a key is set, it runs on Claude Code's
+`Stop` and `SessionEnd` hooks in every session. Each time, it reads the new part
+of the session transcript and sends the completed turns to your Laminar project
+as OpenTelemetry traces. They go to `https://api.lmnr.ai`, or to the `baseUrl`
+you configure for a self-hosted Laminar. At session end, the upload runs in a
+short-lived background process, so it can finish after Claude Code exits.
+
+Each trace contains:
+
+- your prompt, Claude's text responses, and Claude's thinking text when the
+  model returns it
+- every tool call, with its input and output. Tool calls can include file
+  contents, command output, and fetched web pages
+- subagent activity, read from the subagent transcripts Claude Code writes
+  next to the session transcript
+- the model name and token usage of each LLM call
+- the definitions of the tools offered to each LLM call: Claude Code's
+  built-in tools and the tools of the MCP servers you have configured (names,
+  descriptions and input schemas)
+- session metadata: session id, turn number, operating system, working
+  directory, git branch, Claude Code version, the transcript file's name, and
+  the names of skills used in the turn
+- a user id: `LMNR_USER_ID` if you set it; otherwise, if you've logged in with
+  `lmnr-cli`, the email address (or user id) stored in
+  `~/.config/lmnr/credentials.json`
+
+Images and documents are not sent: each is replaced by an `[image]` or
+`[document]` placeholder. The plugin sends data only to the Laminar endpoint
+above: no analytics or other third-party calls. Laminar stores the traces in your project under the
+[Laminar privacy policy](https://laminar.sh/policies/privacy).
+
+To stop sending traces, disable the plugin (`claude plugin disable lmnr@lmnr`)
+or delete `~/.config/lmnr/claude-code-plugin.json`.
 
 ## Installation
 
@@ -22,7 +59,7 @@ Claude Code's own plugin commands, then create the config file yourself.
 
    ```
    claude plugin marketplace add lmnr-ai/lmnr-claude-code-plugin
-   claude plugin install laminar@laminar --scope user
+   claude plugin install lmnr@lmnr --scope user
    ```
 
 2. Create `~/.config/lmnr/claude-code-plugin.json` with a project API key. Get
@@ -66,17 +103,20 @@ The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
 file when set (handy for CI or a shell you already have configured).
 
 Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
-to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` caps per-field capture
-length (default `20000`); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
+to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` cuts every captured
+string to that many characters (off by default: strings are kept whole up to
+16 MiB); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
 (used by the test suite).
 
 ## How it works
 
 - **Stop hook** — fires after each assistant response; the plugin reads the new
-  portion of the transcript (tracked by byte offset in
-  `~/.claude/state/lmnr_state.json`), assembles complete turns, and emits them.
+  portion of the transcript (tracked by byte offset in a per-session file under
+  `~/.claude/state/lmnr_sessions/`), assembles complete turns, and emits them.
 - **SessionEnd hook** — flushes any turns still deferred (e.g. waiting for
-  background agent notifications).
+  background agent notifications, or the final turn of a `claude -p` run). Claude
+  Code allows SessionEnd hooks only 1.5 s, so the hook hands this export to a
+  detached background process and returns immediately.
 - Turns that launched an async agent are deferred until the agent's task
   notification arrives, so the subagent's full trace lands under the right
   tool span.
