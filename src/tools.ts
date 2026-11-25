@@ -1,7 +1,7 @@
 /**
- * Which tool definitions each generation was offered, from Claude Code's internal
- * `prompt_snapshot` / `deferred_tools_record` rows. They are written only when the
- * set changes, so the timeline persists across runs. Unknown shapes are skipped.
+ * Which tool definitions and system prompt each generation was sent, from Claude
+ * Code's internal `prompt_snapshot` / `deferred_tools_record` rows. They are written
+ * only when the set changes, so the timeline persists across runs. Unknown shapes are skipped.
  */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -18,7 +18,11 @@ export interface ToolSetChange {
 interface ToolSet {
   inline: Row[];
   deferred: Row[];
+  system: string[];
 }
+
+// Claude Code's prompt-cache split marker inside `systemPrompt`; never sent as text.
+const SYSTEM_PROMPT_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
 
 // A session's tool set rarely changes; this only bounds a pathological one.
 const MAX_TOOL_SET_CHANGES = 100;
@@ -48,13 +52,20 @@ function toToolDefinitions(entries: any): Row[] {
   return Array.isArray(entries) ? entries.map(toToolDefinition).filter((t): t is Row => t !== null) : [];
 }
 
+/** A snapshot's `systemPrompt` parts, or null when it has none. */
+function toSystemParts(value: any): string[] | null {
+  return Array.isArray(value)
+    ? value.filter((p): p is string => typeof p === "string" && p.trim() !== "" && p !== SYSTEM_PROMPT_BOUNDARY)
+    : null;
+}
+
 export class ToolTimeline {
   changes: ToolSetChange[];
   private readonly persist: boolean;
   private readonly sets = new Map<string, ToolSet>();
   // null when the latest recorded set can't be loaded (its file was pruned or
   // lost): deferred additions then have no base to build on.
-  private current: ToolSet | null = { inline: [], deferred: [] };
+  private current: ToolSet | null = { inline: [], deferred: [], system: [] };
 
   /** `persist` stores new sets for later runs; a subagent's timeline is rebuilt each run. */
   constructor(changes: ToolSetChange[] = [], persist = true) {
@@ -81,8 +92,19 @@ export class ToolTimeline {
     if (typeof attachment !== "object" || attachment === null || typeof row.timestamp !== "string") {
       return;
     }
-    if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { inline: toToolDefinitions(attachment.tools), deferred: this.current?.deferred ?? [] });
+    if (attachment.type === "prompt_snapshot") {
+      const system = toSystemParts(attachment.systemPrompt);
+      if (Array.isArray(attachment.tools)) {
+        this.record(row.timestamp, {
+          inline: toToolDefinitions(attachment.tools),
+          deferred: this.current?.deferred ?? [],
+          system: system ?? this.current?.system ?? [],
+        });
+      } else if (system !== null && this.current !== null && this.changes.length > 0) {
+        // A snapshot without tools before any recorded set is the transcript's first
+        // request; the next snapshot carries its tools and the same system prompt.
+        this.record(row.timestamp, { ...this.current, system });
+      }
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
       if (this.current === null) {
         // Recording deferred tools alone would persist a set without the
@@ -103,6 +125,21 @@ export class ToolTimeline {
    * first request records none but was sent the same tools.
    */
   toolsAt(timestamp: any): Row[] | null {
+    const set = this.setAt(timestamp);
+    if (set === null) {
+      return null;
+    }
+    const tools = [...set.inline, ...set.deferred];
+    return tools.length > 0 ? tools : null;
+  }
+
+  /** System prompt parts in effect at `timestamp`, chosen like `toolsAt`. */
+  systemAt(timestamp: any): string[] | null {
+    const system = this.setAt(timestamp)?.system ?? [];
+    return system.length > 0 ? system : null;
+  }
+
+  private setAt(timestamp: any): ToolSet | null {
     if (this.changes.length === 0) {
       return null;
     }
@@ -114,18 +151,13 @@ export class ToolTimeline {
         }
       }
     }
-    const set = this.load(change.hash);
-    if (set === null) {
-      return null;
-    }
-    const tools = [...set.inline, ...set.deferred];
-    return tools.length > 0 ? tools : null;
+    return this.load(change.hash);
   }
 
-  private record(timestamp: string, { inline, deferred }: ToolSet): void {
+  private record(timestamp: string, { inline, deferred, system }: ToolSet): void {
     // Fixed key order: the hash is over the JSON text, and the same set must
     // hash the same whether it was just observed or loaded from its file.
-    const set: ToolSet = { inline, deferred };
+    const set: ToolSet = { inline, deferred, system };
     this.current = set;
     const hash = crypto.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
     this.sets.set(hash, set);
@@ -149,7 +181,11 @@ export class ToolTimeline {
     }
     try {
       const raw = JSON.parse(fs.readFileSync(path.join(toolSetDir(), `${hash}.json`), "utf-8"));
-      const set: ToolSet = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
+      const set: ToolSet = {
+        inline: toToolDefinitions(raw.inline),
+        deferred: toToolDefinitions(raw.deferred),
+        system: toSystemParts(raw.system) ?? [],
+      };
       this.sets.set(hash, set);
       touchToolSet(hash);
       return set;

@@ -13,6 +13,7 @@ const nonEmpty = (v: unknown): string => (typeof v === "string" ? v : "");
 
 export const DEBUG = env("CC_LMNR_DEBUG").toLowerCase() === "true";
 export const CAPTURE_SKILL_CONTENT = env("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
+export const CAPTURE_SYSTEM_PROMPT = env("CC_LMNR_CAPTURE_SYSTEM_PROMPT").toLowerCase() !== "false";
 // Opt-in cap on each captured string, in characters; unset (the default) means none.
 const maxChars = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10);
 export const MAX_CHARS: number | null = maxChars > 0 ? maxChars : null;

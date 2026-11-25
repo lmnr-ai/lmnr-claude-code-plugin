@@ -9,20 +9,22 @@ const USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", 
 // A generation's input history stays under this, so one span stays within about one request.
 const MAX_INPUT_BYTES = MAX_PAYLOAD_BYTES;
 
-/** The history as JSON; past MAX_INPUT_BYTES the oldest messages after the prompt become a note. */
-function boundedHistoryJson(history: Row[]): string {
-  const json = JSON.stringify(history);
+/** The system message and history as JSON; past MAX_INPUT_BYTES the oldest messages after the prompt become a note. */
+function boundedHistoryJson(system: Row | null, history: Row[]): string {
+  const lead = system === null ? [] : [system];
+  const json = JSON.stringify([...lead, ...history]);
   if (Buffer.byteLength(json) <= MAX_INPUT_BYTES || history.length < 2) {
     return json;
   }
   const sizes = history.map((m) => Buffer.byteLength(JSON.stringify(m)) + 1);
-  let budget = MAX_INPUT_BYTES - sizes[0]! - 100;
+  const leadSize = system === null ? 0 : Buffer.byteLength(JSON.stringify(system)) + 1;
+  let budget = MAX_INPUT_BYTES - leadSize - sizes[0]! - 100;
   let keepFrom = history.length;
   while (keepFrom > 1 && sizes[keepFrom - 1]! <= budget) {
     budget -= sizes[--keepFrom]!;
   }
   const note = { role: "user", content: [{ type: "text", text: `[${keepFrom - 1} earlier messages omitted]` }] };
-  return JSON.stringify([history[0], note, ...history.slice(keepFrom)]);
+  return JSON.stringify([...lead, history[0], note, ...history.slice(keepFrom)]);
 }
 
 /** Truncate every string in a JSON value (tool inputs can carry whole files). */
@@ -94,11 +96,16 @@ export function buildUserMessage(userRow: Row): Row {
   return { role: "user", content: toAnthropicContent(contentOf(userRow)) };
 }
 
+function systemMessage(parts: string[] | null): Row | null {
+  return parts === null ? null : { role: "system", content: parts.map((text) => ({ type: "text", text: truncate(text) })) };
+}
+
 /** One generation's attributes, its tool_use blocks, and the message to append to the history. */
 export function buildGenerationAttributes(
   history: Row[],
   assistantMessage: Row,
-  toolDefinitions: Row[] | null = null
+  toolDefinitions: Row[] | null = null,
+  systemPrompt: string[] | null = null
 ): [Record<string, any>, Row[], Row] {
   const content = contentOf(assistantMessage);
   const toolUses = blocksOf(content, "tool_use");
@@ -109,7 +116,7 @@ export function buildGenerationAttributes(
     "gen_ai.system": "anthropic",
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
-    "gen_ai.input.messages": boundedHistoryJson(history),
+    "gen_ai.input.messages": boundedHistoryJson(systemMessage(systemPrompt), history),
   };
   if (toolDefinitions !== null && toolDefinitions.length > 0) {
     attrs["gen_ai.tool.definitions"] = JSON.stringify(toolDefinitions);

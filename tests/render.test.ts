@@ -36,6 +36,28 @@ describe("turn spans", () => {
     assert.deepEqual(json(llm, "gen_ai.output.messages")[0].content, [{ type: "text", text: "hi" }]);
   });
 
+  it("LLM span input opens with the system prompt in effect", async () => {
+    const s = await render([
+      userRow("hello"),
+      promptSnapshotRow([], "2026-07-08T10:00:01.000Z", ["You are Claude Code.", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "# Env"]),
+      assistantRow([{ type: "text", text: "hi" }]),
+    ]);
+    const input = json(s["LLM Call 1"]!, "gen_ai.input.messages");
+    assert.deepEqual(input[0], {
+      role: "system",
+      content: [
+        { type: "text", text: "You are Claude Code." },
+        { type: "text", text: "# Env" },
+      ],
+    });
+    assert.equal(input[1].role, "user");
+  });
+
+  it("LLM span input has no system message when the transcript records none", async () => {
+    const s = await render([userRow("hello"), assistantRow([{ type: "text", text: "hi" }])]);
+    assert.equal(json(s["LLM Call 1"]!, "gen_ai.input.messages")[0].role, "user");
+  });
+
   it("tool turn: tool span, and the next generation sees the result", async () => {
     const s = await render([
       userRow("run ls"),

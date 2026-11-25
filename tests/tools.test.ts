@@ -89,6 +89,24 @@ describe("ToolTimeline", () => {
     assert.ok(fs.statSync(file).mtimeMs > Date.now() - 60_000);
   });
 
+  it("tracks the system prompt with the tools, without the cache boundary marker", () => {
+    const timeline = ToolTimeline.fromRows([
+      promptSnapshotRow(null, "2026-07-08T10:00:00.000Z", ["You are Claude Code.", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "# Env"]),
+      promptSnapshotRow([read], "2026-07-08T10:00:02.000Z", ["You are Claude Code.", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "# Env"]),
+      // Without tools after a recorded set: the system prompt changed, the tools did not.
+      promptSnapshotRow(null, "2026-07-08T10:00:06.000Z", ["You are Claude Code.", "# Env 2"]),
+    ]);
+    assert.deepEqual(timeline.systemAt("2026-07-08T10:00:01.000Z"), ["You are Claude Code.", "# Env"]);
+    assert.deepEqual(timeline.systemAt("2026-07-08T10:00:07.000Z"), ["You are Claude Code.", "# Env 2"]);
+    assert.deepEqual(timeline.toolsAt("2026-07-08T10:00:07.000Z")?.map((t) => t.name), ["Read"]);
+  });
+
+  it("keeps the system prompt across hook runs", () => {
+    const first = new ToolTimeline();
+    first.observe(promptSnapshotRow([read], "2026-07-08T10:00:00.000Z", ["persisted prompt"]));
+    assert.deepEqual(new ToolTimeline(first.changes).systemAt("2026-07-08T10:01:00.000Z"), ["persisted prompt"]);
+  });
+
   it("does not build on a stored set that is gone", () => {
     const first = new ToolTimeline();
     first.observe(promptSnapshotRow([bash], "2026-07-08T10:00:00.000Z"));
