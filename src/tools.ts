@@ -52,7 +52,7 @@ function toToolDefinitions(entries: any): Row[] {
   return Array.isArray(entries) ? entries.map(toToolDefinition).filter((t): t is Row => t !== null) : [];
 }
 
-/** A snapshot's `systemPrompt` parts, or null when it has none. */
+/** A snapshot's `systemPrompt` text parts (empty when it sent none), or null when the field is absent. */
 function toSystemParts(value: any): string[] | null {
   return Array.isArray(value)
     ? value.filter((p): p is string => typeof p === "string" && p.trim() !== "" && p !== SYSTEM_PROMPT_BOUNDARY)
