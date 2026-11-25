@@ -505,6 +505,7 @@ var env = (name) => process.env[name] ?? "";
 var nonEmpty = (v) => typeof v === "string" ? v : "";
 var DEBUG = env("CC_LMNR_DEBUG").toLowerCase() === "true";
 var CAPTURE_SKILL_CONTENT = env("CC_LMNR_CAPTURE_SKILL_CONTENT").toLowerCase() === "true";
+var CAPTURE_SYSTEM_PROMPT = env("CC_LMNR_CAPTURE_SYSTEM_PROMPT").toLowerCase() !== "false";
 var maxChars = Number.parseInt(env("CC_LMNR_MAX_CHARS"), 10);
 var MAX_CHARS = maxChars > 0 ? maxChars : null;
 var MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
@@ -2194,19 +2195,21 @@ function taskIdMap(subagents) {
 // src/genai.ts
 var USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
 var MAX_INPUT_BYTES = MAX_PAYLOAD_BYTES;
-function boundedHistoryJson(history) {
-  const json = JSON.stringify(history);
+function boundedHistoryJson(system, history) {
+  const lead = system === null ? [] : [system];
+  const json = JSON.stringify([...lead, ...history]);
   if (Buffer.byteLength(json) <= MAX_INPUT_BYTES || history.length < 2) {
     return json;
   }
   const sizes = history.map((m) => Buffer.byteLength(JSON.stringify(m)) + 1);
-  let budget = MAX_INPUT_BYTES - sizes[0] - 100;
+  const leadSize = system === null ? 0 : Buffer.byteLength(JSON.stringify(system)) + 1;
+  let budget = MAX_INPUT_BYTES - leadSize - sizes[0] - 100;
   let keepFrom = history.length;
   while (keepFrom > 1 && sizes[keepFrom - 1] <= budget) {
     budget -= sizes[--keepFrom];
   }
   const note = { role: "user", content: [{ type: "text", text: `[${keepFrom - 1} earlier messages omitted]` }] };
-  return JSON.stringify([history[0], note, ...history.slice(keepFrom)]);
+  return JSON.stringify([...lead, history[0], note, ...history.slice(keepFrom)]);
 }
 function truncateStrings(value) {
   if (typeof value === "string") {
@@ -2268,7 +2271,10 @@ function toolResultBlock(toolUseId, content, isError) {
 function buildUserMessage(userRow) {
   return { role: "user", content: toAnthropicContent(contentOf(userRow)) };
 }
-function buildGenerationAttributes(history, assistantMessage, toolDefinitions = null) {
+function systemMessage(parts) {
+  return parts === null ? null : { role: "system", content: parts.map((text) => ({ type: "text", text: truncate(text) })) };
+}
+function buildGenerationAttributes(history, assistantMessage, toolDefinitions = null, systemPrompt = null) {
   const content = contentOf(assistantMessage);
   const toolUses = blocksOf(content, "tool_use");
   const outputMessage = { role: "assistant", content: toAnthropicContent(content) };
@@ -2277,7 +2283,7 @@ function buildGenerationAttributes(history, assistantMessage, toolDefinitions = 
     "gen_ai.system": "anthropic",
     "gen_ai.request.model": model,
     "gen_ai.response.model": model,
-    "gen_ai.input.messages": boundedHistoryJson(history)
+    "gen_ai.input.messages": boundedHistoryJson(systemMessage(systemPrompt), history)
   };
   if (toolDefinitions !== null && toolDefinitions.length > 0) {
     attrs["gen_ai.tool.definitions"] = JSON.stringify(toolDefinitions);
@@ -2305,6 +2311,7 @@ function buildGenerationAttributes(history, assistantMessage, toolDefinitions = 
 var crypto2 = __toESM(require("node:crypto"), 1);
 var fs4 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
+var SYSTEM_PROMPT_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
 var MAX_TOOL_SET_CHANGES = 100;
 var TOOL_SET_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
 function toolSetDir() {
@@ -2327,13 +2334,16 @@ function toToolDefinition(entry) {
 function toToolDefinitions(entries) {
   return Array.isArray(entries) ? entries.map(toToolDefinition).filter((t) => t !== null) : [];
 }
+function toSystemParts(value) {
+  return Array.isArray(value) ? value.filter((p) => typeof p === "string" && p.trim() !== "" && p !== SYSTEM_PROMPT_BOUNDARY) : null;
+}
 var ToolTimeline = class _ToolTimeline {
   changes;
   persist;
   sets = /* @__PURE__ */ new Map();
   // null when the latest recorded set can't be loaded (its file was pruned or
   // lost): deferred additions then have no base to build on.
-  current = { inline: [], deferred: [] };
+  current = { inline: [], deferred: [], system: [] };
   /** `persist` stores new sets for later runs; a subagent's timeline is rebuilt each run. */
   constructor(changes = [], persist = true) {
     this.changes = changes.slice(-MAX_TOOL_SET_CHANGES);
@@ -2357,8 +2367,17 @@ var ToolTimeline = class _ToolTimeline {
     if (typeof attachment !== "object" || attachment === null || typeof row.timestamp !== "string") {
       return;
     }
-    if (attachment.type === "prompt_snapshot" && Array.isArray(attachment.tools)) {
-      this.record(row.timestamp, { inline: toToolDefinitions(attachment.tools), deferred: this.current?.deferred ?? [] });
+    if (attachment.type === "prompt_snapshot") {
+      const system = toSystemParts(attachment.systemPrompt);
+      if (Array.isArray(attachment.tools)) {
+        this.record(row.timestamp, {
+          inline: toToolDefinitions(attachment.tools),
+          deferred: this.current?.deferred ?? [],
+          system: system ?? this.current?.system ?? []
+        });
+      } else if (system !== null && this.current !== null && this.changes.length > 0) {
+        this.record(row.timestamp, { ...this.current, system });
+      }
     } else if (attachment.type === "deferred_tools_record" && Array.isArray(attachment.entries)) {
       if (this.current === null) {
         return;
@@ -2376,6 +2395,19 @@ var ToolTimeline = class _ToolTimeline {
    * first request records none but was sent the same tools.
    */
   toolsAt(timestamp) {
+    const set = this.setAt(timestamp);
+    if (set === null) {
+      return null;
+    }
+    const tools = [...set.inline, ...set.deferred];
+    return tools.length > 0 ? tools : null;
+  }
+  /** System prompt parts in effect at `timestamp`, chosen like `toolsAt`. */
+  systemAt(timestamp) {
+    const system = this.setAt(timestamp)?.system ?? [];
+    return system.length > 0 ? system : null;
+  }
+  setAt(timestamp) {
     if (this.changes.length === 0) {
       return null;
     }
@@ -2387,15 +2419,10 @@ var ToolTimeline = class _ToolTimeline {
         }
       }
     }
-    const set = this.load(change.hash);
-    if (set === null) {
-      return null;
-    }
-    const tools = [...set.inline, ...set.deferred];
-    return tools.length > 0 ? tools : null;
+    return this.load(change.hash);
   }
-  record(timestamp, { inline, deferred }) {
-    const set = { inline, deferred };
+  record(timestamp, { inline, deferred, system }) {
+    const set = { inline, deferred, system };
     this.current = set;
     const hash = crypto2.createHash("sha256").update(JSON.stringify(set), "utf-8").digest("hex");
     this.sets.set(hash, set);
@@ -2418,7 +2445,11 @@ var ToolTimeline = class _ToolTimeline {
     }
     try {
       const raw = JSON.parse(fs4.readFileSync(path4.join(toolSetDir(), `${hash}.json`), "utf-8"));
-      const set = { inline: toToolDefinitions(raw.inline), deferred: toToolDefinitions(raw.deferred) };
+      const set = {
+        inline: toToolDefinitions(raw.inline),
+        deferred: toToolDefinitions(raw.deferred),
+        system: toSystemParts(raw.system) ?? []
+      };
       this.sets.set(hash, set);
       touchToolSet(hash);
       return set;
@@ -2672,7 +2703,12 @@ function renderConversation(ctx, parent, rows, prefix, startTs) {
     }
     const message = mergeAssistantRows(entry.rows);
     const ts = tsOf(message);
-    const [attrs, toolUses, output] = buildGenerationAttributes(history, message, ctx.tools?.toolsAt(message.timestamp) ?? null);
+    const [attrs, toolUses, output] = buildGenerationAttributes(
+      history,
+      message,
+      ctx.tools?.toolsAt(message.timestamp) ?? null,
+      CAPTURE_SYSTEM_PROMPT ? ctx.tools?.systemAt(message.timestamp) ?? null : null
+    );
     history.push(output);
     const generation = ctx.tracer.start(`${prefix} ${++n}`, inputTs ?? ts, { "lmnr.span.type": "LLM", ...attrs }, parent);
     endSpan(generation, ts ?? generation.startMs);

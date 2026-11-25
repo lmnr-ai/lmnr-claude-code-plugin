@@ -89,9 +89,9 @@ export function notificationRow(inner: string, ts = "2026-07-08T10:05:00.000Z"):
   return userRow(`<task-notification>${inner}</task-notification>`, ts);
 }
 
-/** Claude Code's internal record of the inline tools sent with a request. */
-export function promptSnapshotRow(tools: any[] | null, ts: string): Row {
-  return { type: "attachment", attachment: { type: "prompt_snapshot", systemPrompt: ["…"], tools }, timestamp: ts };
+/** Claude Code's internal record of the system prompt and inline tools sent with a request. */
+export function promptSnapshotRow(tools: any[] | null, ts: string, systemPrompt: any = ["…"]): Row {
+  return { type: "attachment", attachment: { type: "prompt_snapshot", systemPrompt, tools }, timestamp: ts };
 }
 
 /** Claude Code's internal record of deferred tools ToolSearch has loaded. */

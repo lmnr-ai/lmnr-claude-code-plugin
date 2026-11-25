@@ -3,7 +3,7 @@
  * per tool_use, and subagents nested under the tool span that launched them.
  */
 import * as path from "node:path";
-import { CAPTURE_SKILL_CONTENT, type LaminarConfig } from "./config.js";
+import { CAPTURE_SKILL_CONTENT, CAPTURE_SYSTEM_PROMPT, type LaminarConfig } from "./config.js";
 import { buildGenerationAttributes, buildUserMessage, toAnthropicContent, toolResultBlock, truncateStrings } from "./genai.js";
 import { endSpan, setAttributes, type Attrs, type Span, type Tracer } from "./otlp.js";
 import { ToolTimeline } from "./tools.js";
@@ -188,7 +188,12 @@ function renderConversation(
     }
     const message = mergeAssistantRows(entry.rows);
     const ts = tsOf(message);
-    const [attrs, toolUses, output] = buildGenerationAttributes(history, message, ctx.tools?.toolsAt(message.timestamp) ?? null);
+    const [attrs, toolUses, output] = buildGenerationAttributes(
+      history,
+      message,
+      ctx.tools?.toolsAt(message.timestamp) ?? null,
+      CAPTURE_SYSTEM_PROMPT ? (ctx.tools?.systemAt(message.timestamp) ?? null) : null
+    );
     history.push(output);
     const generation = ctx.tracer.start(`${prefix} ${++n}`, inputTs ?? ts, { "lmnr.span.type": "LLM", ...attrs }, parent);
     endSpan(generation, ts ?? generation.startMs);

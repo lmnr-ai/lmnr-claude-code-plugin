@@ -21,6 +21,10 @@ Each trace contains:
 - subagent activity, read from the subagent transcripts Claude Code writes
   next to the session transcript
 - the model name and token usage of each LLM call
+- Claude Code's system prompt for each LLM call. It includes the path of your
+  Claude Code memory directory (under your home directory) and an environment
+  block (platform, shell, OS version, model). Set
+  `CC_LMNR_CAPTURE_SYSTEM_PROMPT=false` to leave it out
 - the definitions of the tools offered to each LLM call: Claude Code's
   built-in tools and the tools of the MCP servers you have configured (names,
   descriptions and input schemas)
@@ -102,11 +106,12 @@ claude-code`):
 The environment variables `LMNR_PROJECT_API_KEY` / `LMNR_BASE_URL` override the
 file when set (handy for CI or a shell you already have configured).
 
-Advanced env-only knobs (rarely needed): `CC_LMNR_DEBUG=true` writes a debug log
-to `~/.claude/state/lmnr_hook.log`; `CC_LMNR_MAX_CHARS` cuts every captured
-string to that many characters (off by default: strings are kept whole up to
-16 MiB); `CC_LMNR_STATE_DIR` relocates the state file/lock/log
-(used by the test suite).
+Advanced env-only knobs (rarely needed): `CC_LMNR_CAPTURE_SYSTEM_PROMPT=false`
+stops sending Claude Code's system prompt with each LLM call (sent by default);
+`CC_LMNR_DEBUG=true` writes a debug log to `~/.claude/state/lmnr_hook.log`;
+`CC_LMNR_MAX_CHARS` cuts every captured string to that many characters (off by
+default: strings are kept whole up to 16 MiB); `CC_LMNR_STATE_DIR` relocates
+the state file/lock/log (used by the test suite).
 
 ## How it works
 
